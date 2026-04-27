@@ -10,6 +10,22 @@ import numpy as np
 from scipy.stats import linregress
 
 
+def canonical_drug_name(drug: str) -> str:
+    text = (drug or "").strip()
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in {"MPA", "MYCOPHENOLATE", "MYCOPHENOLIC ACID"}:
+        return "MPA"
+    if upper in {"TAC", "TACROLIMUS"}:
+        return "TAC"
+    if upper in {"CSA", "CYCLOSPORINE"}:
+        return "CsA"
+    if upper == "SIROLIMUS":
+        return "Sirolimus"
+    return text
+
+
 THERAPEUTIC_RANGES = {
     'MPA': {
         'range': (30, 60),
@@ -45,6 +61,13 @@ THERAPEUTIC_RANGES = {
 # ─────────────────────────────────────────────────────────────────
 LSS_EQUATIONS = {
     # Key: (CNI, n_points) → (label, intercept, {time: coefficient}, r2, reference)
+    ('MPA', 3): {
+        'label': '3-point (C₀, C₀.₅, C₂) — MPA AUC₀₋₁₂',
+        'intercept': 7.75,
+        'coefficients': {0.0: 6.49, 0.5: 0.76, 2.0: 2.43},
+        'r2': None,
+        'reference': 'Provided equation',
+    },
     ('TAC', 4): {
         'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [Tac]',
         'intercept': 5.85,
@@ -194,6 +217,7 @@ def calculate_lss_auc(times, concentrations, cni='TAC'):
 
     Returns dict or None if no matching equation found.
     """
+    cni = canonical_drug_name(cni)
     time_conc = dict(zip(times, concentrations))
 
     # Try to find matching equation
@@ -230,6 +254,7 @@ def calculate_lss_auc(times, concentrations, cni='TAC'):
 
 def interpret_result(drug, auc_0_12):
     """Return interpretation string and (low, high) range."""
+    drug = canonical_drug_name(drug)
     info = THERAPEUTIC_RANGES.get(drug)
     if not info:
         return 'N/A', None

@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.egg
+
+# PyInstaller build output
+build/
+dist/
+
+# Database — patient data, never commit
+tdm_report.db
+*.db
+*.db-shm
+*.db-wal
+
+# License — security sensitive, never commit
+license.json
+
+# Logs — patient audit data, never commit
+logs/
+
+# Generated HTML reports — patient data
+generated_reports/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Backup files
+*.bak
+saved_patients.json.bak

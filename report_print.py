@@ -216,7 +216,7 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '</div>',
         '<div class="section-block">',
         '<div class="section-title">Drug & Sampling</div>',
-        detail_row("Requested Drug", patient.get('drug', 'N/A'), "MPA preparation", patient.get('preparation', 'N/A')),
+        detail_row("Requested Drug", patient.get('drug', 'N/A'), "Requested Drug Preparation", patient.get('preparation', 'N/A')),
         detail_row("Dose of Requested Drug", patient.get('dose', 'N/A')),
         detail_row("Date and Time of Dose", patient.get('dose_dt', 'N/A')),
         detail_row("Date of Sample Collection", patient.get('sample_collection_date', 'N/A')),
@@ -224,13 +224,17 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '</div>',
         '<div class="section-block">',
         '<div class="section-title result-title">Result:</div>',
-        result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} ug/ml",
+        result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} μg/mL",
                    f"{last_hr} hour extrapolated to 12 hr MPA AUC", f"{fmt(pk['auc_0_12'])} mg.h/L"),
-        result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} ug/ml"),
+        result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} μg/mL"),
+        f'<div class="result-line result-line-interpretation">'
+        f'<div class="result-col result-interpretation"><strong>Interpretation:</strong> <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>'
+        f'<div></div>'
+        f'</div>',
         f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>',
         f'<div class="range-note"><strong>Therapeutic Range:</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
         '</div>',
-        f'<div class="footer">Generated: {escape(generated)} | Interpretation: <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>',
+        f'<div class="footer">Generated: {escape(generated)}</div>',
         '</div>',
     ]
 
@@ -252,24 +256,29 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
     .meta-grid {{ display:flex; flex-direction:column; gap:3px; }}
     .grid-pair {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }}
     .grid-row, .single-row {{ display:flex; gap:5px; align-items:flex-start; line-height:1.22; font-size:15px; }}
-    .grid-label {{ min-width:120px; font-weight:700; }}
+    .grid-label {{ min-width:150px; font-weight:700; white-space:nowrap; }}
     .grid-value {{ flex:1; }}
     .single-row {{ margin-top:6px; }}
     .full-row .grid-value {{ white-space: nowrap; }}
     .section-title {{ font-size:16px; font-weight:700; margin:12px 0 6px; }}
     .result-title {{ margin-top:8px; }}
-    .result-line {{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin:5px 0; }}
-    .result-col {{ display:flex; align-items:flex-start; gap:5px; font-size:15px; }}
-    .r-label {{ font-weight:700; }}
-    .r-value {{ font-weight:700; }}
+    .result-line {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin:2px 0; align-items:start; }}
+    .result-col {{ display:flex; align-items:flex-start; gap:4px; font-size:15px; white-space:nowrap; }}
+    .r-label {{ font-weight:700; white-space:nowrap; }}
+    .r-value {{ font-weight:700; white-space:nowrap; }}
+    .result-line-interpretation {{ margin-top:0; }}
+    .result-interpretation {{ font-size:15px; }}
     .graph-wrap {{ margin:18px auto 14px; text-align:center; border-top:1px solid #DDD; padding-top:12px; }}
     .graph-wrap img {{ width:650px; max-width:100%; height:auto; }}
     .range-note {{ margin-top:14px; font-size:15px; line-height:1.4; }}
     .footer {{ margin-top:18px; text-align:center; color:#555; font-size:12px; }}
     @media print {{
       body {{ margin:0; }}
-      .page {{ width:auto; margin:0; padding:16px 18px; }}
+      .page {{ width:auto; margin:0; padding:12px 12px; }}
       .patient-box {{ border-width:1.5px; }}
+      .result-line {{ grid-template-columns: 1fr 1fr; gap:12px; }}
+      .result-col {{ display:flex; gap:4px; }}
+      .r-label, .r-value {{ white-space:nowrap; }}
     }}
   </style>
 </head>
