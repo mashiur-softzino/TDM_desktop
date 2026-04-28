@@ -109,19 +109,22 @@ def mixed_trapezoidal_auc(times, concentrations):
     times = np.array(times, dtype=float)
     concs = np.array(concentrations, dtype=float)
     auc = 0.0
+    segments = []
     for i in range(1, len(times)):
         dt = times[i] - times[i - 1]
         c0, c1 = concs[i - 1], concs[i]
+        area = 0.0
         if c1 >= c0:
             # Rising or flat → linear trapezoid
-            auc += dt * (c0 + c1) / 2.0
+            area = dt * (c0 + c1) / 2.0
         else:
             # Falling → log-linear trapezoid
             if c1 > 0 and c0 > 0:
-                auc += dt * (c0 - c1) / np.log(c0 / c1)
+                area = dt * (c0 - c1) / np.log(c0 / c1)
             else:
                 # Fallback to linear if concentration hits zero
-                auc += dt * (c0 + c1) / 2.0
+                area = dt * (c0 + c1) / 2.0
+        auc += area
     return auc
 
 

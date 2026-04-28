@@ -284,19 +284,7 @@ class ResultsDialog(QDialog):
         self.stat_auc12.set_unit("mg·h/L")
         self.stat_auc12.set_value(fmt(pk['auc_0_12'], 3))
 
-        # Extrapolation % warning (>20% = unreliable per FDA standard)
-        auc_last = pk.get('auc_0_last', 0)
-        auc_12 = pk.get('auc_0_12', 0)
-        if auc_12 and auc_12 > 0:
-            extrap_pct = (auc_12 - auc_last) / auc_12 * 100
-            if extrap_pct > 20:
-                self.stat_auc12.set_warning(
-                    f"⚠ Extrapolation {extrap_pct:.0f}% of total AUC (>20% — result may be unreliable)"
-                )
-            else:
-                self.stat_auc12.set_warning(None)
-        else:
-            self.stat_auc12.set_warning(None)
+        self.stat_auc12.set_warning(None)
 
         self.stat_thalf.set_label("Terminal  t½")
         self.stat_thalf.set_unit("hours")
@@ -313,16 +301,7 @@ class ResultsDialog(QDialog):
             self.stat_lss.set_unit(pk.get('lss_equation', 'LSS estimate') + "  •  mg·h/L")
             self.stat_lss.setVisible(True)
 
-            # LSS vs AUC₀₋₁₂ sanity check — >50% difference = unreliable
-            if auc_12 and auc_12 > 0:
-                lss_diff_pct = abs(lss_val - auc_12) / auc_12 * 100
-                if lss_diff_pct > 50:
-                    self.stat_lss.set_value(fmt(lss_val, 3), color=ORANGE)
-                    self.stat_lss.set_warning(
-                        f"⚠ LSS differs {lss_diff_pct:.0f}% from AUC₀₋₁₂ — result may be unreliable"
-                    )
-                else:
-                    self.stat_lss.set_warning(None)
+            self.stat_lss.set_warning(None)
         else:
             self.stat_lss.setVisible(False)
 

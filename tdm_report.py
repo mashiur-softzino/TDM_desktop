@@ -905,7 +905,7 @@ class TDMMainWindow(QMainWindow):
         self.f_drug.currentTextChanged.connect(self._on_data_changed)
 
         self.f_preparation = field("e.g. Mycept-5")
-        self.f_preparation.setText("Mycophenolate Mofetil (MMF)")
+        self.f_preparation.setText("Mycophenolate Mofetil")
         self.f_dose = field("e.g. 540 mg - 720 mg")
         for edit in [self.f_preparation, self.f_dose]:
             edit.textChanged.connect(self._on_data_changed)
@@ -913,6 +913,12 @@ class TDMMainWindow(QMainWindow):
         self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._on_data_changed())
         self.f_sample_collection_date = SmartDateEdit()
         self.f_sample_collection_date.dateChanged.connect(lambda *_: self._on_data_changed())
+        self.f_sample_collection_date.dateChanged.connect(self._update_tx_duration)
+        self.f_tx_date.dateChanged.connect(self._update_tx_duration)
+
+        self.f_tx_duration = field("Calculated automatically")
+        self.f_tx_duration.setReadOnly(True)
+        self.f_tx_duration.setPlaceholderText("Duration will appear here")
 
         def add_meta(row, col, label, widget, required=False):
             col_lay = QVBoxLayout()
@@ -991,6 +997,7 @@ class TDMMainWindow(QMainWindow):
         add_meta(0, 2, "Dose of Requested Drug", self.f_dose, required=True)
         add_meta(0, 3, "Dose Date & Time", self.f_dose_dt)
         add_meta(1, 0, "Sample Collection Date", self.f_sample_collection_date)
+        add_meta(1, 1, "Time Duration (Post-Tx)", self.f_tx_duration)
         meta_box_lay.addLayout(meta_grid)
         card.body().addWidget(meta_box)
 
@@ -1322,6 +1329,28 @@ class TDMMainWindow(QMainWindow):
         self._update_action_buttons()
         self._debounce.start(400)   # debounce 400 ms for live plot
 
+    def _update_tx_duration(self):
+        tx_date = self.f_tx_date.date()
+        sample_date = self.f_sample_collection_date.date()
+        
+        days = tx_date.daysTo(sample_date)
+        
+        if days < 0:
+            self.f_tx_duration.setText("Invalid Date (Tx > Sample)")
+            return
+            
+        years = days // 365
+        remaining_days = days % 365
+        months = remaining_days // 30
+        final_days = remaining_days % 30
+        
+        parts = []
+        if years > 0: parts.append(f"{years} Year{'s' if years > 1 else ''}")
+        if months > 0: parts.append(f"{months} Month{'s' if months > 1 else ''}")
+        if final_days > 0 or not parts: parts.append(f"{final_days} Day{'s' if final_days != 1 else ''}")
+        
+        self.f_tx_duration.setText(", ".join(parts))
+
     def _live_plot(self):
         return
 
@@ -1648,6 +1677,7 @@ class TDMMainWindow(QMainWindow):
         self.f_dose.setText(patient.get('dose', '540mg - 720mg') if patient.get('dose') != 'N/A' else '')
         tx_date = QDate.fromString(patient.get('tx_date', ''), "dd.MM.yyyy")
         self.f_tx_date.setDate(tx_date if tx_date.isValid() else QDate.currentDate())
+        self._update_tx_duration()
         dose_dt_text = patient.get('dose_dt', '')
         dose_dt = QDateTime.fromString(dose_dt_text, "dd.MM.yyyy 'at' hh:mmAP")
         if not dose_dt.isValid():
