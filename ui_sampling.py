@@ -373,11 +373,13 @@ class GradientCanvas(FigureCanvas):
         )
 
         conc_unit = 'μg/mL' if canonical_drug_name(drug) == 'MPA' else 'ng/mL'
-        self.ax.set_xlabel('Time (h)', fontsize=11, color='#9E9E9E', labelpad=8)
+        self.ax.set_xlabel('Time (min)', fontsize=11, color='#9E9E9E', labelpad=8)
         self.ax.set_ylabel(f'Conc. ({conc_unit})', fontsize=11, color='#9E9E9E', labelpad=8)
         self.ax.set_title('Concentration–Time Curve', fontsize=13,
                            fontweight='bold', color='#1A1A2E', pad=14)
         self.ax.set_xlim(left=max(-0.15, times[0] - 0.2))
+        self.ax.set_xticks(times)
+        self.ax.set_xticklabels([f"{int(t * 60)}" for t in times])
         self.ax.set_ylim(bottom=0)
         self.fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.20)
         self.draw()

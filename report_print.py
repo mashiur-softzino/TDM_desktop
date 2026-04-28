@@ -182,8 +182,10 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         )
 
         ax.set_xlim(left=max(-0.15, plot_times[0] - 0.2), right=max(plot_times[-1], 7))
+        ax.set_xticks(plot_times)
+        ax.set_xticklabels([f"{int(t * 60)}" for t in plot_times])
         ax.set_ylim(bottom=0)
-        ax.set_xlabel("Time (hrs)", fontsize=10, fontweight="bold")
+        ax.set_xlabel("Time (min)", fontsize=10, fontweight="bold")
         ax.set_ylabel("Conc.(μg/ml)", fontsize=10, fontweight="bold")
         ax.set_title("Concentration-Time Curve", fontsize=12, fontweight='bold', pad=12)
         fig.tight_layout()
@@ -223,7 +225,7 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         f'<div class="single-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(patient.get("med", "N/A"))}</span></div>',
         '</div>',
         '<div class="section-block">',
-        '<div class="section-title">Drug & Sampling</div>',
+        '<div class="section-title">Drug &amp; Sampling</div>',
         detail_row("Requested Drug", patient.get('drug', 'N/A'), "Requested Drug Preparation", patient.get('preparation', 'N/A')),
         detail_row("Dose of Requested Drug", patient.get('dose', 'N/A')),
         detail_row("Date and Time of Dose", patient.get('dose_dt', 'N/A')),
@@ -233,16 +235,22 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '<div class="section-block">',
         '<div class="section-title result-title">Result:</div>',
     ]
-    # Direct AUC mode: only show AUC and interpretation
+    # Use LSS AUC when available (since interpretation is based on it)
+    if pk.get('auc_lss') is not None:
+        auc_display = fmt(pk['auc_lss'])
+        auc_label = "LSS AUC\u2080\u208b\u2081\u2082 (Estimated)"
+    else:
+        auc_display = fmt(pk['auc_0_12'])
+        auc_label = f"{last_hr} hour extrapolated to 12 hr MPA AUC"
     if has_data:
         sections += [
-            result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} μg/mL",
-                       f"{last_hr} hour extrapolated to 12 hr MPA AUC", f"{fmt(pk['auc_0_12'])} mg.h/L"),
-            result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} μg/mL"),
+            result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} \u03bcg/mL",
+                       auc_label, f"{auc_display} mg.h/L"),
+            result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} \u03bcg/mL"),
         ]
     else:
         sections += [
-            result_row("MPA AUC₀₋₁₂", f"{fmt(pk['auc_0_12'])} mg.h/L"),
+            result_row("MPA AUC\u2080\u208b\u2081\u2082", f"{fmt(pk['auc_0_12'])} mg.h/L"),
         ]
     sections += [
         f'<div class="result-line result-line-interpretation">'
