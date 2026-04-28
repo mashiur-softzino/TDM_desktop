@@ -863,6 +863,19 @@ class DrugSelector(QFrame):
                 self._show_options(self.DRUG_OPTIONS)
             QTimer.singleShot(0, _open)
             return False
+        if event.type() == QEvent.Type.Wheel and self._drop_frame.isVisible():
+            obj_widget = _obj if isinstance(_obj, QWidget) else None
+            if obj_widget is not None and (
+                obj_widget is self._list
+                or obj_widget is self._list.viewport()
+                or self._drop_frame.isAncestorOf(obj_widget)
+            ):
+                bar = self._list.verticalScrollBar()
+                bar.setValue(bar.value() - event.angleDelta().y())
+                return True
+            self._hide_dropdown()
+            self._apply_selected_style()
+            return False
         if event.type() == QEvent.Type.ApplicationDeactivate:
             self._hide_dropdown()
             self._apply_selected_style()

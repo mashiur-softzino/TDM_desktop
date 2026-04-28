@@ -54,8 +54,7 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Patient Name:",    patient.get('name', 'N/A'))
     row("Age:",             f"{patient.get('age', 'N/A')} years")
     row("Weight:",          f"{patient.get('weight', 'N/A')} kg")
-    row("Hospital ID:",     patient.get('hosp_id', 'N/A'))
-    row("Ward / Dept:",     patient.get('ward', 'N/A'))
+    row("Patient Phone:",   patient.get('hosp_id', 'N/A'))
     row("Diagnosis:",       patient.get('diag', 'N/A'))
     row("Date of Transplant:", patient.get('tx_date', 'N/A'))
     row("Medications:",     patient.get('med', 'N/A'))
@@ -216,10 +215,10 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '</div>',
         '<div class="patient-box">',
         '<div class="meta-grid">',
-        detail_row("Patient Name", patient.get('name', 'N/A'), "Hospital Number", patient.get('hosp_id', 'N/A')),
-        detail_row("Age (years)", patient.get('age', 'N/A'), "Ward", patient.get('ward', 'N/A')),
-        detail_row("Sex", patient.get('sex', 'N/A'), "Dept / Unit", patient.get('dept', 'N/A')),
-        detail_row("Weight (Kg)", patient.get('weight', 'N/A'), "Date of Transplant", patient.get('tx_date', 'N/A')),
+        detail_row("Patient Name", patient.get('name', 'N/A'), "Patient Phone", patient.get('hosp_id', 'N/A')),
+        detail_row("Age (years)", patient.get('age', 'N/A'), "Date of Transplant", patient.get('tx_date', 'N/A')),
+        detail_row("Sex", patient.get('sex', 'N/A')),
+        detail_row("Weight (Kg)", patient.get('weight', 'N/A')),
         '</div>',
         f'<div class="single-row"><span class="grid-label">Diagnosis</span><span class="grid-value">{escape(patient.get("diag", "N/A"))}</span></div>',
         f'<div class="single-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(patient.get("med", "N/A"))}</span></div>',

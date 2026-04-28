@@ -700,11 +700,10 @@ class TDMMainWindow(QMainWindow):
         self.f_weight  = field("e.g. 70")
         self.f_hosp_no = field("e.g. 01914700094")
         self.f_hosp_no.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self))
-        self.f_ward    = field("e.g. Ward 8")
-        self.f_dept    = field("e.g. Neph-2")
+
         self.f_diag    = field("e.g. Post Renal Transplant")
         self.f_diag.setText("Post Renal Transplant")
-        for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no, self.f_ward, self.f_dept, self.f_diag]:
+        for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no, self.f_diag]:
             edit.textChanged.connect(self._on_data_changed)
 
         # Sex selector
@@ -782,11 +781,9 @@ class TDMMainWindow(QMainWindow):
         add_field(demo_grid, 0, 2, "Age (Years)", self.f_age)
         add_field(demo_grid, 0, 3, "Sex", self.f_sex)
 
-        # Row 1: Hospital No | Ward | Department/Unit | Weight
-        add_field(demo_grid, 1, 0, "Hospital Number", self.f_hosp_no)
-        add_field(demo_grid, 1, 1, "Ward", self.f_ward)
-        add_field(demo_grid, 1, 2, "Department / Unit", self.f_dept)
-        add_field(demo_grid, 1, 3, "Weight (kg)", self.f_weight)
+        # Row 1: Weight | Patient Phone
+        add_field(demo_grid, 1, 0, "Weight (kg)", self.f_weight)
+        add_field(demo_grid, 1, 1, "Patient Phone", self.f_hosp_no, span=2)
 
         demographics_lay.addLayout(demo_grid)
         card.body().addWidget(demographics_box)
@@ -819,13 +816,15 @@ class TDMMainWindow(QMainWindow):
         clinical_grid = QGridLayout()
         clinical_grid.setSpacing(16)
         clinical_grid.setHorizontalSpacing(20)
-        clinical_grid.setColumnStretch(0, 1)
-        clinical_grid.setColumnStretch(1, 1)
+        clinical_grid.setColumnStretch(0, 0)
+        clinical_grid.setColumnStretch(1, 0)
+        clinical_grid.setColumnStretch(2, 1)
 
         date_col = QVBoxLayout()
         date_col.setSpacing(8)
         date_col.addWidget(small_label("Date of Transplant", color="#7E8DA3", size=10, bold=True))
-        self.f_tx_date.setMaximumWidth(620)
+        self.f_tx_date.setMinimumWidth(400)
+        self.f_tx_date.setMaximumWidth(400)
         date_col.addWidget(self.f_tx_date, 0, Qt.AlignmentFlag.AlignTop)
         date_col.addStretch()
         clinical_grid.addLayout(date_col, 0, 0, Qt.AlignmentFlag.AlignTop)
@@ -833,7 +832,8 @@ class TDMMainWindow(QMainWindow):
         med_col = QVBoxLayout()
         med_col.setSpacing(8)
         med_col.addWidget(small_label("Medications", color="#7E8DA3", size=10, bold=True))
-        self.f_med.setMaximumWidth(620)
+        self.f_med.setMinimumWidth(400)
+        self.f_med.setMaximumWidth(400)
         med_col.addWidget(self.f_med, 0, Qt.AlignmentFlag.AlignTop)
         med_col.addStretch()
         clinical_grid.addLayout(med_col, 0, 1, Qt.AlignmentFlag.AlignTop)
@@ -1368,8 +1368,8 @@ class TDMMainWindow(QMainWindow):
             'sex': '' if self.f_sex.currentText() == "Choose a sex" else self.f_sex.currentText(),
             'weight': self.f_weight.text().strip() or 'N/A',
             'hosp_id': self.f_hosp_no.text().strip() or 'N/A',
-            'ward': self.f_ward.text().strip() or 'N/A',
-            'dept': self.f_dept.text().strip() or 'N/A',
+            'ward': 'N/A',
+            'dept': 'N/A',
             'drug': self.f_drug.currentText().strip(),
             'preparation': self.f_preparation.text().strip(),
             'dose': self.f_dose.text().strip(),
@@ -1638,8 +1638,7 @@ class TDMMainWindow(QMainWindow):
         self.f_age.setText(patient.get('age', '') if patient.get('age') != 'N/A' else '')
         self.f_weight.setText(patient.get('weight', '') if patient.get('weight') != 'N/A' else '')
         self.f_hosp_no.setText(patient.get('hosp_id', '') if patient.get('hosp_id') != 'N/A' else '')
-        self.f_ward.setText(patient.get('ward', '') if patient.get('ward') != 'N/A' else '')
-        self.f_dept.setText(patient.get('dept', '') if patient.get('dept') != 'N/A' else '')
+
         sex_value = patient.get('sex', '').strip()
         sex_index = self.f_sex.findText(sex_value) if sex_value else 0
         self.f_sex.setCurrentIndex(sex_index if sex_index >= 0 else 0)
@@ -1991,7 +1990,7 @@ class TDMMainWindow(QMainWindow):
         if close_results and hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
         for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no,
-                     self.f_ward, self.f_dept, self.f_dose,
+                     self.f_dose,
                      self.f_diag, self.trough_edit]:
             edit.clear()
         self.f_drug.setCurrentIndex(0)
