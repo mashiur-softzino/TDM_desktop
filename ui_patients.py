@@ -55,6 +55,10 @@ class ResultsDialog(QDialog):
             "Trough Concentration", unit="μg/mL",
             icon_name="mdi6.water-outline", icon_color="#7C3AED", icon_bg="#EDE9FE",
         )
+        self.stat_c05 = StatBox(
+            "0.5 hr Concentration", unit="μg/mL",
+            icon_name="mdi6.clock-outline", icon_color="#0891B2", icon_bg="#CFFAFE",
+        )
         self.stat_clast = StatBox(
             "Last Sample Concentration", unit="μg/mL",
             icon_name="mdi6.flask-outline", icon_color="#0284C7", icon_bg="#E0F2FE",
@@ -80,13 +84,50 @@ class ResultsDialog(QDialog):
             icon_name="mdi6.function-variant", icon_color="#7C3AED", icon_bg="#EDE9FE",
         )
         boxes = [
-            self.stat_trough, self.stat_clast, self.stat_auc,
-            self.stat_auc12, self.stat_interp, self.stat_thalf,
-            self.stat_lss,
+            self.stat_trough, self.stat_c05,   self.stat_clast,
+            self.stat_auc,    self.stat_auc12, self.stat_interp,
+            self.stat_thalf,  self.stat_lss,
         ]
         for i, box in enumerate(boxes):
             grid.addWidget(box, i // 3, i % 3)
         self.results_card.body().addLayout(grid)
+
+        # Show All Points toggle
+        self._show_all_expanded = False
+        self._show_all_btn = QPushButton("Show All Points  ▾")
+        self._show_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._show_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: #F0F4F8; color: {BLUE};
+                border: 1px solid #D0DCF0; border-radius: 8px;
+                font-size: 12px; font-weight: 600;
+                padding: 6px 16px;
+            }}
+            QPushButton:hover {{ background: #E8F0FE; }}
+        """)
+        self._show_all_btn.setFixedHeight(32)
+        self._show_all_btn.hide()
+        self._show_all_btn.clicked.connect(self._toggle_all_points)
+
+        show_all_row = QHBoxLayout()
+        show_all_row.addStretch()
+        show_all_row.addWidget(self._show_all_btn)
+        self.results_card.body().addLayout(show_all_row)
+
+        # Collapsible all-points panel
+        self._all_points_frame = QFrame()
+        self._all_points_frame.setStyleSheet(f"""
+            QFrame {{
+                background: #F8FAFC;
+                border: 1px solid #E8ECF0;
+                border-radius: 12px;
+            }}
+        """)
+        self._all_points_grid = QGridLayout(self._all_points_frame)
+        self._all_points_grid.setSpacing(10)
+        self._all_points_grid.setContentsMargins(12, 12, 12, 12)
+        self._all_points_frame.hide()
+        self.results_card.body().addWidget(self._all_points_frame)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -103,6 +144,7 @@ class ResultsDialog(QDialog):
         self.canvas = GradientCanvas()
         self.graph_card.body().addWidget(self.canvas)
         content_lay.addWidget(self.graph_card)
+        self.graph_card.hide()  # Hidden by default, shown when data is available
 
         scroll.setWidget(content)
         lay.addWidget(scroll, 1)
@@ -155,7 +197,14 @@ class ResultsDialog(QDialog):
         self._position_toast()
         self._toast.show_message(title, body, tone=tone)
 
-    def apply_results(self, pk, interp):
+    def _toggle_all_points(self):
+        self._show_all_expanded = not self._show_all_expanded
+        self._all_points_frame.setVisible(self._show_all_expanded)
+        self._show_all_btn.setText(
+            "Hide Points  ▴" if self._show_all_expanded else "Show All Points  ▾"
+        )
+
+    def apply_results(self, pk, interp, times=None, concs=None):
         def fmt_hour(v):
             return f"{int(v)}" if float(v).is_integer() else f"{v:.1f}"
 
@@ -166,6 +215,65 @@ class ResultsDialog(QDialog):
         self.stat_trough.set_label("Trough Concentration")
         self.stat_trough.set_unit("μg/mL")
         self.stat_trough.set_value(fmt(pk['c_trough'], 2))
+
+        # 0.5 hr concentration
+        c_05 = next((c for t, c in zip(times or [], concs or []) if abs(t - 0.5) < 0.05), None)
+        if c_05 is not None:
+            self.stat_c05.set_label("0.5 hr Concentration")
+            self.stat_c05.set_unit("μg/mL")
+            self.stat_c05.set_value(fmt(c_05, 2))
+            self.stat_c05.setVisible(True)
+        else:
+            self.stat_c05.setVisible(False)
+
+        # Build "Show All" panel for post-dose points
+        post = [(t, c) for t, c in zip(times or [], concs or []) if t > 0]
+        while self._all_points_grid.count():
+            item = self._all_points_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if len(post) > 2:
+            self._show_all_btn.show()
+            cols = 4
+            for i, (t, c) in enumerate(post):
+                tile = QFrame()
+                tile.setStyleSheet(f"""
+                    QFrame {{
+                        background: white;
+                        border: 1.5px solid #E8ECF0;
+                        border-radius: 12px;
+                    }}
+                """)
+                tile.setGraphicsEffect(make_shadow(8, 2, 12))
+                tile_lay = QVBoxLayout(tile)
+                tile_lay.setContentsMargins(12, 10, 12, 10)
+                tile_lay.setSpacing(4)
+
+                time_lbl = QLabel(f"{fmt_hour(t)} hr")
+                time_lbl.setStyleSheet(
+                    f"color: {BLUE}; font-size: 11px; font-weight: 700; "
+                    "background: transparent; border: none; padding: 0;"
+                )
+                conc_lbl = QLabel(fmt(c, 2))
+                conc_lbl.setStyleSheet(
+                    f"color: {TEXT_CLR}; font-size: 18px; font-weight: 700; "
+                    "background: transparent; border: none; padding: 0;"
+                )
+                unit_lbl = QLabel("μg/mL")
+                unit_lbl.setStyleSheet(
+                    "color: #9E9E9E; font-size: 10px; background: transparent; "
+                    "border: none; padding: 0;"
+                )
+
+                tile_lay.addWidget(time_lbl)
+                tile_lay.addWidget(conc_lbl)
+                tile_lay.addWidget(unit_lbl)
+                self._all_points_grid.addWidget(tile, i // cols, i % cols)
+        else:
+            self._show_all_btn.hide()
+            self._all_points_frame.hide()
+            self._show_all_expanded = False
+
         self.stat_clast.set_label(f"{last_hr} hr Concentration")
         self.stat_clast.set_unit("μg/mL")
         self.stat_clast.set_value(fmt(pk['c_last'], 2))
@@ -220,6 +328,10 @@ class ResultsDialog(QDialog):
 
     def plot_data(self, times, concs, drug='MPA'):
         self.canvas.plot(times, concs, drug=drug)
+
+    def set_graph_visible(self, visible: bool):
+        """Show or hide the graph card (hidden for Direct AUC / single-value mode)."""
+        self.graph_card.setVisible(visible)
 
 
 class PatientReportDialog(QDialog):

@@ -193,10 +193,18 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
     interp_color = '#E53935' if interp in ('Low', 'High') else '#2E7D32'
-    times_str = "Trough, " + ", ".join(str(t) for t in times[1:]) + " hours post dose." if len(times) > 1 else "Trough"
+    has_data = bool(times and concs)
+    if has_data:
+        times_str = "Trough, " + ", ".join(str(t) for t in times[1:]) + " hours post dose." if len(times) > 1 else "Trough"
+    else:
+        times_str = "Direct AUC input"
     generated = datetime.now().strftime('%d.%m.%Y %H:%M')
-    last_hr = int(pk['t_last']) if float(pk['t_last']).is_integer() else pk['t_last']
-    graph_uri = graph_uri or graph_data_uri()
+    last_hr = int(pk['t_last']) if pk.get('t_last') is not None and float(pk['t_last']).is_integer() else (pk.get('t_last') or 0)
+    # Only generate graph when there are actual data points
+    if has_data:
+        graph_uri = graph_uri or graph_data_uri()
+    else:
+        graph_uri = None
 
     sections = [
         '<div class="report-shell">',
@@ -224,14 +232,27 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '</div>',
         '<div class="section-block">',
         '<div class="section-title result-title">Result:</div>',
-        result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} μg/mL",
-                   f"{last_hr} hour extrapolated to 12 hr MPA AUC", f"{fmt(pk['auc_0_12'])} mg.h/L"),
-        result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} μg/mL"),
+    ]
+    # Direct AUC mode: only show AUC and interpretation
+    if has_data:
+        sections += [
+            result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} μg/mL",
+                       f"{last_hr} hour extrapolated to 12 hr MPA AUC", f"{fmt(pk['auc_0_12'])} mg.h/L"),
+            result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} μg/mL"),
+        ]
+    else:
+        sections += [
+            result_row("MPA AUC₀₋₁₂", f"{fmt(pk['auc_0_12'])} mg.h/L"),
+        ]
+    sections += [
         f'<div class="result-line result-line-interpretation">'
         f'<div class="result-col result-interpretation"><strong>Interpretation:</strong> <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>'
         f'<div></div>'
         f'</div>',
-        f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>',
+    ]
+    if graph_uri:
+        sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>')
+    sections += [
         f'<div class="range-note"><strong>Therapeutic Range:</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
         '</div>',
         f'<div class="footer">Generated: {escape(generated)}</div>',

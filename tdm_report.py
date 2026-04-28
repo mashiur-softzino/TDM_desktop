@@ -1018,7 +1018,77 @@ class TDMMainWindow(QMainWindow):
         control_title.setStyleSheet(f"color: {TEXT_CLR}; font-size: 13px; font-weight: 700;")
         control_head.addWidget(control_title)
         control_head.addStretch()
+
+        # Mode toggle — Multi-point | Direct AUC
+        self._sampling_mode = 'multi'
+        toggle_shell = QFrame()
+        toggle_shell.setStyleSheet("background: #EAF0F7; border-radius: 12px;")
+        toggle_lay = QHBoxLayout(toggle_shell)
+        toggle_lay.setContentsMargins(4, 4, 4, 4)
+        toggle_lay.setSpacing(4)
+
+        def _make_toggle_btn(text, mode):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(30)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent; border: none;
+                    border-radius: 9px; font-size: 12px;
+                    font-weight: 600; color: #64748B;
+                    padding: 0 14px;
+                }
+                QPushButton:checked {
+                    background: white; color: #EA580C;
+                }
+            """)
+            btn.clicked.connect(lambda: self._switch_sampling_mode(mode))
+            return btn
+
+        self._toggle_multi = _make_toggle_btn("Multi-point", 'multi')
+        self._toggle_direct = _make_toggle_btn("Direct AUC", 'direct')
+        self._toggle_multi.setChecked(True)
+        toggle_lay.addWidget(self._toggle_multi)
+        toggle_lay.addWidget(self._toggle_direct)
+        control_head.addWidget(toggle_shell)
         control_lay.addLayout(control_head)
+
+        # Direct AUC input (hidden by default)
+        self._direct_auc_box = QWidget()
+        direct_lay = QVBoxLayout(self._direct_auc_box)
+        direct_lay.setContentsMargins(0, 4, 0, 4)
+        direct_lay.setSpacing(8)
+        direct_lay.addWidget(small_label(
+            "AUC₀₋₁₂ (mg·h/L) — enter known value directly",
+            color="#7E8DA3", size=10, bold=True, uppercase=False
+        ))
+        self._direct_auc_edit = QLineEdit()
+        self._direct_auc_edit.setPlaceholderText("e.g. 45.5")
+        self._direct_auc_edit.setFixedWidth(220)
+        self._direct_auc_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: white;
+                border: 1.5px solid #FDBA74;
+                border-radius: 16px;
+                padding: 13px 18px;
+                font-size: 18px;
+                font-weight: bold;
+                color: {TEXT_CLR};
+            }}
+            QLineEdit:focus {{ border: 2px solid #EA580C; }}
+        """)
+        self._direct_auc_edit.textChanged.connect(self._on_data_changed)
+        direct_lay.addWidget(self._direct_auc_edit)
+        self._direct_auc_box.hide()
+        control_lay.addWidget(self._direct_auc_box)
+
+        # Multi-point container
+        self._multi_point_box = QWidget()
+        multi_lay = QVBoxLayout(self._multi_point_box)
+        multi_lay.setContentsMargins(0, 0, 0, 0)
+        multi_lay.setSpacing(14)
 
         top_row = QHBoxLayout()
         top_row.setSpacing(28)
@@ -1109,16 +1179,17 @@ class TDMMainWindow(QMainWindow):
 
         top_row.addLayout(dur_col, 1)
         top_row.addStretch()
-        control_lay.addLayout(top_row)
-        card.body().addWidget(control_box)
-
+        multi_lay.addLayout(top_row)
         # ── Modern sample table ──
         table_col = QVBoxLayout(); table_col.setSpacing(8)
         table_col.addWidget(small_label("Sample Points", color="#7E8DA3", size=10, bold=True))
         self.sample_table = ModernSampleTable()
         self.sample_table.data_changed.connect(self._on_data_changed)
         table_col.addWidget(self.sample_table)
-        card.body().addLayout(table_col)
+        multi_lay.addLayout(table_col)
+
+        control_lay.addWidget(self._multi_point_box)
+        card.body().addWidget(control_box)
 
         # Populate with default scheme
         self._populate_table(initial_duration)
@@ -1200,6 +1271,13 @@ class TDMMainWindow(QMainWindow):
         if selected is None or selected not in self._duration_options:
             selected = self._duration_options[0]
         self._refresh_duration_controls(selected=selected)
+
+    def _switch_sampling_mode(self, mode: str):
+        self._sampling_mode = mode
+        is_direct = (mode == 'direct')
+        self._direct_auc_box.setVisible(is_direct)
+        self._multi_point_box.setVisible(not is_direct)
+        self._on_data_changed()
 
     def _add_duration_option(self):
         dlg = DurationEditModal("Add Sampling Duration", "Save Duration", parent=self)
@@ -1305,6 +1383,8 @@ class TDMMainWindow(QMainWindow):
     def _form_signature(self):
         return {
             'patient': self._patient_payload(),
+            'sampling_mode': getattr(self, '_sampling_mode', 'multi'),
+            'direct_auc': self._direct_auc_edit.text().strip() if hasattr(self, '_direct_auc_edit') else '',
             'scheme': getattr(self, '_current_scheme', 4),
             'duration_options': list(getattr(self, '_duration_options', DEFAULT_DURATION_OPTIONS)),
             'trough': self.trough_edit.text().strip(),
@@ -1312,12 +1392,18 @@ class TDMMainWindow(QMainWindow):
         }
 
     def _snapshot_payload(self):
-        times, concs = self._read_table(skip_empty=True)
+        mode = getattr(self, '_sampling_mode', 'multi')
+        if mode == 'direct':
+            times, concs = [], []
+        else:
+            times, concs = self._read_table(skip_empty=True)
         data = {
             'id': datetime.now().strftime("%Y%m%d%H%M%S%f"),
             'saved_at': datetime.now().strftime("%d/%m/%Y"),
             'report_path': '',
             'patient': self._patient_payload(),
+            'sampling_mode': mode,
+            'direct_auc': self._direct_auc_edit.text().strip() if hasattr(self, '_direct_auc_edit') else '',
             'scheme': getattr(self, '_current_scheme', 4),
             'duration_options': list(getattr(self, '_duration_options', DEFAULT_DURATION_OPTIONS)),
             'trough': self.trough_edit.text().strip(),
@@ -1338,6 +1424,12 @@ class TDMMainWindow(QMainWindow):
     def _has_required_sampling_fields(self):
         if not hasattr(self, 'f_drug'):
             return False
+        if getattr(self, '_sampling_mode', 'multi') == 'direct':
+            try:
+                val = float(self._direct_auc_edit.text().strip())
+                return val > 0
+            except (ValueError, AttributeError):
+                return False
         return all([
             self.f_drug.currentText().strip(),
             self.f_preparation.text().strip(),
@@ -1347,6 +1439,9 @@ class TDMMainWindow(QMainWindow):
     def _can_generate_or_save(self):
         if not self.f_name.text().strip() or not self._has_required_sampling_fields():
             return False
+        # Direct AUC mode only needs a valid AUC value (checked above)
+        if getattr(self, '_sampling_mode', 'multi') == 'direct':
+            return True
         times, concs = self._read_table(skip_empty=False)
         return times is not None and len(times) >= 3
 
@@ -1529,6 +1624,14 @@ class TDMMainWindow(QMainWindow):
         self._active_record_id = snapshot.get('id')
         self._active_record_source = snapshot.get('record_type', 'sample')
         self._scheme_rows_cache = {}
+        # Restore sampling mode (multi / direct)
+        saved_mode = snapshot.get('sampling_mode', 'multi')
+        self._switch_sampling_mode(saved_mode)
+        if saved_mode == 'direct':
+            self._toggle_direct.setChecked(True)
+            self._direct_auc_edit.setText(snapshot.get('direct_auc', ''))
+        else:
+            self._toggle_multi.setChecked(True)
         self._set_duration_options(snapshot.get('duration_options', self._global_duration_options), selected=snapshot.get('scheme', 4))
         patient = snapshot.get('patient', {})
         self.f_name.setText(patient.get('name', '') if patient.get('name') != 'N/A' else '')
@@ -1691,10 +1794,14 @@ class TDMMainWindow(QMainWindow):
         if self._results_dialog is None:
             self._results_dialog = ResultsDialog(self, print_handler=self._print_report)
             self._results_dialog.finished.connect(self._on_results_dialog_closed)
-        self._results_dialog.apply_results(pk, interp)
-        if hasattr(self, '_last_times') and hasattr(self, '_last_concs'):
+        _times = getattr(self, '_last_times', None)
+        _concs = getattr(self, '_last_concs', None)
+        self._results_dialog.apply_results(pk, interp, times=_times, concs=_concs)
+        has_data = bool(_times and _concs)
+        self._results_dialog.set_graph_visible(has_data)
+        if has_data:
             drug_name = getattr(self, '_last_drug', 'MPA')
-            self._results_dialog.plot_data(self._last_times, self._last_concs, drug=drug_name)
+            self._results_dialog.plot_data(_times, _concs, drug=drug_name)
         self._results_dialog.show()
         self._results_dialog.raise_()
         self._results_dialog.activateWindow()
@@ -1719,6 +1826,60 @@ class TDMMainWindow(QMainWindow):
     def _calculate(self):
         if hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
+
+        drug = canonical_drug_name(self.f_drug.currentText().strip() or 'MPA')
+
+        # ── Direct AUC mode ───────────────────────────────────────────
+        if getattr(self, '_sampling_mode', 'multi') == 'direct':
+            try:
+                auc_val = float(self._direct_auc_edit.text().strip())
+                if auc_val <= 0:
+                    raise ValueError
+            except ValueError:
+                QMessageBox.warning(self, "Invalid Value",
+                                    "Please enter a valid AUC value (mg·h/L).")
+                return
+            pk = {
+                'auc_0_last': auc_val,
+                'auc_0_12':   auc_val,
+                'auc_lss':    auc_val,
+                'lss_equation': 'Direct input (mg·h/L)',
+                'lambda_z':   None,
+                't_half':     None,
+                'r_squared':  None,
+                't_last':     0.0,
+                'c_trough':   None,
+                'c_last':     None,
+            }
+            interp, _ = interpret_result(drug, auc_val)
+            self._last_pk    = pk
+            self._last_times = []
+            self._last_concs = []
+            self._last_interp = interp
+            self._last_drug  = drug
+            p = self._patient_payload()
+            log_report_generated(p.get('pid', 'N/A'), p.get('name', 'N/A'), drug, auc_val)
+            self._apply_results(pk, interp)
+            snapshot = self._snapshot_payload()
+            existing_id = getattr(self, '_active_record_id', None)
+            if existing_id:
+                snapshot['id'] = existing_id
+            # Save report file (no graph for direct AUC mode)
+            saved_path = self._save_report_file(snapshot, graph_uri=None)
+            snapshot['report_path'] = saved_path or ''
+            if getattr(self, '_active_record_source', None) == 'draft' and existing_id:
+                delete_record(existing_id)
+            save_record(snapshot, 'sample')
+            self._report_snapshot = snapshot
+            self._active_record_id = snapshot['id']
+            self._active_record_source = 'sample'
+            self._loaded_form_signature = self._form_signature()
+            self._load_saved_patients()
+            self._refresh_patients_list()
+            self._reset_to_sample_list_on_result_close = True
+            return
+        # ─────────────────────────────────────────────────────────────
+
         times, concs = self._read_table(skip_empty=False)
 
         if times is None or len(times) < 3:
@@ -1727,8 +1888,6 @@ class TDMMainWindow(QMainWindow):
                 "Please enter at least the trough + 2 post-dose concentrations."
             )
             return
-
-        drug = canonical_drug_name(self.f_drug.currentText().strip() or 'MPA')
         if any(b <= a for a, b in zip(times, times[1:])):
             QMessageBox.warning(
                 self,
@@ -1825,6 +1984,10 @@ class TDMMainWindow(QMainWindow):
         self._scheme_rows_cache = {}
         default_duration = self._global_duration_options[0] if self._global_duration_options else 4
         self._set_duration_options(self._global_duration_options, selected=default_duration)
+        # Reset sampling mode to multi-point
+        self._switch_sampling_mode('multi')
+        self._toggle_multi.setChecked(True)
+        self._direct_auc_edit.clear()
         if close_results and hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
         for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no,

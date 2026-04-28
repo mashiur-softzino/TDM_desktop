@@ -61,6 +61,7 @@ THERAPEUTIC_RANGES = {
 # ─────────────────────────────────────────────────────────────────
 LSS_EQUATIONS = {
     # Key: (CNI, n_points) → (label, intercept, {time: coefficient}, r2, reference)
+    # Only MPA is active. Others kept for future use when more drugs are added.
     ('MPA', 3): {
         'label': '3-point (C₀, C₀.₅, C₂) — MPA AUC₀₋₁₂',
         'intercept': 7.75,
@@ -68,34 +69,34 @@ LSS_EQUATIONS = {
         'r2': None,
         'reference': 'Provided equation',
     },
-    ('TAC', 4): {
-        'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [Tac]',
-        'intercept': 5.85,
-        'coefficients': {0.0: 2.50, 0.5: 0.64, 1.0: 3.53, 2.0: 1.43},
-        'r2': 0.94,
-        'reference': 'Le Meur Y et al. Transplantation 2003',
-    },
-    ('CsA', 4): {
-        'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [CsA]',
-        'intercept': 11.11,
-        'coefficients': {0.0: 1.78, 0.5: 0.68, 1.0: 2.86, 2.0: 1.13},
-        'r2': 0.93,
-        'reference': 'Le Meur Y et al. Transplantation 2003',
-    },
-    ('TAC', 3): {
-        'label': '3-point (C₀, C₁, C₂) — Le Meur 2003 [Tac]',
-        'intercept': 7.38,
-        'coefficients': {0.0: 3.97, 1.0: 3.88, 2.0: 2.02},
-        'r2': 0.92,
-        'reference': 'Le Meur Y et al. Transplantation 2003',
-    },
-    ('ANY', 4): {
-        'label': '4-point (C₀, C₁, C₂, C₄) — van Hest 2006',
-        'intercept': 2.2,
-        'coefficients': {0.0: 2.7, 1.0: 4.5, 2.0: 2.4, 4.0: 4.3},
-        'r2': 0.93,
-        'reference': 'van Hest RM et al. Clin Pharmacokinet 2006',
-    },
+    # ('TAC', 4): {
+    #     'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [Tac]',
+    #     'intercept': 5.85,
+    #     'coefficients': {0.0: 2.50, 0.5: 0.64, 1.0: 3.53, 2.0: 1.43},
+    #     'r2': 0.94,
+    #     'reference': 'Le Meur Y et al. Transplantation 2003',
+    # },
+    # ('CsA', 4): {
+    #     'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [CsA]',
+    #     'intercept': 11.11,
+    #     'coefficients': {0.0: 1.78, 0.5: 0.68, 1.0: 2.86, 2.0: 1.13},
+    #     'r2': 0.93,
+    #     'reference': 'Le Meur Y et al. Transplantation 2003',
+    # },
+    # ('TAC', 3): {
+    #     'label': '3-point (C₀, C₁, C₂) — Le Meur 2003 [Tac]',
+    #     'intercept': 7.38,
+    #     'coefficients': {0.0: 3.97, 1.0: 3.88, 2.0: 2.02},
+    #     'r2': 0.92,
+    #     'reference': 'Le Meur Y et al. Transplantation 2003',
+    # },
+    # ('ANY', 4): {
+    #     'label': '4-point (C₀, C₁, C₂, C₄) — van Hest 2006',
+    #     'intercept': 2.2,
+    #     'coefficients': {0.0: 2.7, 1.0: 4.5, 2.0: 2.4, 4.0: 4.3},
+    #     'r2': 0.93,
+    #     'reference': 'van Hest RM et al. Clin Pharmacokinet 2006',
+    # },
 }
 
 
