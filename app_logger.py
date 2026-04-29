@@ -15,9 +15,9 @@ import sys
 import traceback
 from datetime import date
 from pathlib import Path
+from app_paths import log_dir
 
-LOG_DIR = Path(__file__).parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR = log_dir()
 
 _FMT_APP   = "%(asctime)s | %(levelname)-8s | %(message)s"
 _FMT_ERROR = "%(asctime)s | %(levelname)-8s | %(pathname)s:%(lineno)d | %(message)s"

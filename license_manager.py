@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+from app_paths import license_file, migrate_legacy_file
 
 try:
     from nacl.exceptions import BadSignatureError
@@ -26,7 +27,8 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
     VerifyKey = None
 
 BASE_URL = "https://dev-license.softzino.com/api/v1/license"
-LICENSE_FILE = Path(__file__).parent / "license.json"
+LICENSE_FILE = license_file()
+migrate_legacy_file("license.json", LICENSE_FILE)
 HEARTBEAT_INTERVAL = 300  # 5 minutes
 
 PASETO_HEADER = b"v4.public."

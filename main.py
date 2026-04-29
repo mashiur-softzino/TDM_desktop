@@ -90,6 +90,7 @@ def main():
 
     # Import deferred until after splash is visible — all heavy libraries load here
     from tdm_report import TDMMainWindow, STYLE
+    from database import create_database_backup
     app.setStyleSheet(STYLE)
 
     window = TDMMainWindow()
@@ -147,9 +148,16 @@ def main():
     expiry_timer.timeout.connect(handle_runtime_expiry)
     expiry_timer.start()
 
+    backup_timer = QTimer()
+    backup_timer.setInterval(30 * 60 * 1000)
+    backup_timer.timeout.connect(lambda: create_database_backup("scheduled"))
+    backup_timer.start()
+
     def cleanup_runtime_checks():
         precise_expiry_timer.stop()
         expiry_timer.stop()
+        backup_timer.stop()
+        create_database_backup("shutdown")
         lm._stop_heartbeat()
         log_shutdown()
 

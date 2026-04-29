@@ -1781,8 +1781,8 @@ class TDMMainWindow(QMainWindow):
     def _save_report_file(self, snapshot, graph_uri=None):
         try:
             from report_print import build_report_html
-            reports_dir = Path(__file__).resolve().with_name("generated_reports")
-            reports_dir.mkdir(exist_ok=True)
+            from app_paths import reports_dir as get_reports_dir
+            reports_dir = get_reports_dir()
             report_path = reports_dir / f"{snapshot['id']}.html"
             html = build_report_html(
                 patient=snapshot.get('patient', {}),

@@ -3,14 +3,22 @@ TDM Report — Database layer
 SQLite backend replacing saved_patients.json
 """
 
-import sqlite3
 import json
 import random
+import shutil
+import sqlite3
 import string
 from pathlib import Path
 from datetime import datetime
 
-DB_FILE = Path(__file__).resolve().with_name("tdm_report.db")
+import sqlcipher3
+from app_paths import backups_dir, db_file, migrate_legacy_file
+
+DB_FILE = db_file()
+migrate_legacy_file("tdm_report.db", DB_FILE)
+SQLCIPHER_PASSWORD = "TDM_REPORT_SOFTZINO_2026_DB_KEY"
+SQLITE_HEADER = b"SQLite format 3\x00"
+BACKUP_KEEP_COUNT = 5
 DEFAULT_MEDICATIONS_SEED = [
     "Tacrolimus (TAC)", "Cyclosporine (CsA)", "Mycophenolate (MPA)",
     "Prednisolone", "Methylprednisolone", "Amlodipine", "Metoprolol",
@@ -27,10 +35,164 @@ DEFAULT_MEDICATIONS_SEED = [
 # Connection
 # ─────────────────────────────────────────
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_FILE)
+def _is_plain_sqlite(path: Path) -> bool:
+    if not path.exists():
+        return False
+    with path.open("rb") as fh:
+        return fh.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+
+
+def _set_cipher_key(conn, password: str):
+    escaped = password.replace("'", "''")
+    conn.execute(f"PRAGMA key = '{escaped}'")
+
+
+def _encrypted_connection(path: Path) -> sqlcipher3.Connection:
+    conn = sqlcipher3.connect(str(path))
+    _set_cipher_key(conn, SQLCIPHER_PASSWORD)
+    return conn
+
+
+def _backup_files() -> list[Path]:
+    return sorted(
+        backups_dir().glob("tdm_report.backup.*.db"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _validate_database(path: Path) -> bool:
+    if not path.exists():
+        return False
+
+    conn = _encrypted_connection(path)
+    try:
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+        return bool(result and result[0] == "ok")
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def _remove_sidecar_files(path: Path):
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(str(path) + suffix)
+        if sidecar.exists():
+            try:
+                sidecar.unlink()
+            except Exception:
+                pass
+
+
+def _prune_database_backups():
+    for old_backup in _backup_files()[BACKUP_KEEP_COUNT:]:
+        try:
+            old_backup.unlink()
+        except Exception:
+            pass
+
+
+def create_database_backup(reason: str = "manual") -> Path | None:
+    """Create a consistent encrypted database backup and keep the newest 5."""
+    if not DB_FILE.exists():
+        restore_latest_database_backup()
+    if not DB_FILE.exists():
+        return None
+
+    safe_reason = "".join(ch for ch in reason.lower() if ch.isalnum() or ch in ("-", "_")) or "manual"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = backups_dir() / f"tdm_report.backup.{timestamp}.{safe_reason}.db"
+
+    source = _encrypted_connection(DB_FILE)
+    try:
+        source.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        result = source.execute("PRAGMA integrity_check").fetchone()
+        if not result or result[0] != "ok":
+            raise RuntimeError("Source database integrity check failed")
+    finally:
+        source.close()
+
+    shutil.copy2(DB_FILE, backup_path)
+    if not _validate_database(backup_path):
+        if backup_path.exists():
+            backup_path.unlink()
+        raise RuntimeError("Database backup integrity check failed")
+    _remove_sidecar_files(backup_path)
+
+    _prune_database_backups()
+    return backup_path
+
+
+def restore_latest_database_backup() -> Path | None:
+    """Restore the newest valid backup when the main database is missing/corrupt."""
+    for backup_path in _backup_files():
+        if not _validate_database(backup_path):
+            continue
+        _remove_sidecar_files(backup_path)
+
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        if DB_FILE.exists():
+            corrupt_path = backups_dir() / f"tdm_report.corrupt-{timestamp}.db"
+            try:
+                shutil.copy2(DB_FILE, corrupt_path)
+            except Exception:
+                pass
+
+        DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup_path, DB_FILE)
+        _remove_sidecar_files(DB_FILE)
+        return backup_path
+
+    return None
+
+
+def _encrypt_plain_database():
+    if not _is_plain_sqlite(DB_FILE):
+        return
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = backups_dir() / f"tdm_report.plain.bak-{timestamp}.db"
+    encrypted_path = DB_FILE.with_suffix(f".encrypted-{timestamp}.db")
+
+    source = sqlite3.connect(str(DB_FILE))
+    target = sqlcipher3.connect(str(encrypted_path))
+    try:
+        _set_cipher_key(target, SQLCIPHER_PASSWORD)
+        target.executescript("\n".join(source.iterdump()))
+        ok = target.execute("PRAGMA integrity_check").fetchone()[0]
+        if ok != "ok":
+            raise RuntimeError(f"Encrypted database integrity check failed: {ok}")
+        target.commit()
+    finally:
+        source.close()
+        target.close()
+
+    shutil.copy2(DB_FILE, backup_path)
+    encrypted_path.replace(DB_FILE)
+
+
+def _connect() -> sqlcipher3.Connection:
+    if not DB_FILE.exists():
+        restore_latest_database_backup()
+
+    _encrypt_plain_database()
+    conn = _encrypted_connection(DB_FILE)
+    try:
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except Exception:
+        conn.close()
+        if restore_latest_database_backup():
+            conn = _encrypted_connection(DB_FILE)
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        else:
+            raise
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA secure_delete = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = FULL")
+    conn.row_factory = sqlcipher3.Row
     return conn
 
 

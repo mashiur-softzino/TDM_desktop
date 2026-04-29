@@ -47,3 +47,12 @@ env/
 # Backup files
 *.bak
 saved_patients.json.bak
+
+# Build executables / Nuitka output
+*.exe
+nuitka_onefile/
+nuitka_dist/
+nuitka_standalone/
+*.build/
+*.dist/
+*.onefile-build/
