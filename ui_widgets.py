@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QTimeEdit,
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, pyqtSignal, QDate, QDateTime, QPoint,
+    Qt, QTimer, pyqtSignal, QDate, QDateTime, QPoint, QEvent,
     QPropertyAnimation, QEasingCurve,
 )
 from PyQt6.QtGui import (
@@ -144,7 +144,7 @@ class DurationEditModal(QDialog):
         title_col = QVBoxLayout()
         t = QLabel(title)
         t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
-        s = QLabel("Enter the sampling duration in hours")
+        s = QLabel("Enter the number of sample points")
         s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.75); background: transparent;")
         title_col.addWidget(t)
         title_col.addWidget(s)
@@ -156,13 +156,13 @@ class DurationEditModal(QDialog):
         body_lay = QVBoxLayout(body)
         body_lay.setContentsMargins(24, 20, 24, 20)
         body_lay.setSpacing(16)
-        lbl = QLabel("Duration (Hours)")
+        lbl = QLabel("Sample Points")
         lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {LABEL_CLR}; letter-spacing: 0.8px;")
         body_lay.addWidget(lbl)
 
         self.edit = QLineEdit(initial_value)
-        self.edit.setValidator(QIntValidator(1, 999, self))
-        self.edit.setPlaceholderText("e.g. 3")
+        self.edit.setMaxLength(2)
+        self.edit.setPlaceholderText("e.g. 5")
         self.edit.setStyleSheet(f"""
             QLineEdit {{
                 background: #F7FAFE;
@@ -178,6 +178,7 @@ class DurationEditModal(QDialog):
             }}
         """)
         self.edit.returnPressed.connect(self.accept)
+        self.edit.installEventFilter(self)
         body_lay.addWidget(self.edit)
 
         btn_row = QHBoxLayout()
@@ -215,9 +216,122 @@ class DurationEditModal(QDialog):
         body_lay.addLayout(btn_row)
         lay.addWidget(body)
 
+    def eventFilter(self, obj, event):
+        if obj is self.edit and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.accept()
+                return True
+        return super().eventFilter(obj, event)
+
+    def accept(self):
+        text = self.edit.text().strip()
+        if not text.isdigit() or not (1 <= int(text) <= 12):
+            self.edit.setFocus()
+            parent = self.parent()
+            window = parent.window() if parent is not None else self.window()
+            if hasattr(window, "_show_toast"):
+                window._show_toast("Invalid sample points", "Sample points must be between 1 and 12.", tone="warning")
+            return
+        super().accept()
+
     def get_value(self):
         text = self.edit.text().strip()
-        return int(text) if text else None
+        if not text.isdigit() or not (1 <= int(text) <= 12):
+            return None
+        return int(text)
+
+
+class ConfirmActionModal(QDialog):
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        confirm_label: str = "Yes",
+        cancel_label: str = "No",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedWidth(380)
+        self.setModal(True)
+        self.setStyleSheet("QDialog { background: white; border-radius: 20px; }")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        banner = QFrame()
+        banner.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #DC2626, stop:1 #F97316);
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+        """)
+        banner_lay = QHBoxLayout(banner)
+        banner_lay.setContentsMargins(24, 20, 24, 20)
+        banner_lay.setSpacing(14)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(40, 40)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.alert-outline", color="white").pixmap(22, 22))
+        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.2); border-radius: 20px;")
+        banner_lay.addWidget(icon_lbl)
+
+        title_col = QVBoxLayout()
+        t = QLabel(title)
+        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
+        s = QLabel("Please confirm this action")
+        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.75); background: transparent;")
+        title_col.addWidget(t)
+        title_col.addWidget(s)
+        banner_lay.addLayout(title_col)
+        banner_lay.addStretch()
+        lay.addWidget(banner)
+
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(24, 20, 24, 20)
+        body_lay.setSpacing(16)
+
+        msg = QLabel(message)
+        msg.setWordWrap(True)
+        msg.setStyleSheet(f"font-size: 13px; color: {TEXT_CLR}; line-height: 1.35;")
+        body_lay.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton(cancel_label)
+        cancel_btn.setFixedHeight(40)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: white; color: {LABEL_CLR};
+                border: 1.5px solid {BORDER}; border-radius: 10px;
+                font-size: 13px; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: #F4F8FC; }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        confirm_btn = QPushButton(confirm_label)
+        confirm_btn.setFixedHeight(40)
+        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        confirm_btn.setStyleSheet("""
+            QPushButton {
+                background: #DC2626; color: white;
+                border: none; border-radius: 10px;
+                font-size: 13px; font-weight: bold; padding: 0 20px;
+            }
+            QPushButton:hover { background: #B91C1C; }
+        """)
+        confirm_btn.setDefault(True)
+        confirm_btn.setAutoDefault(True)
+        confirm_btn.clicked.connect(self.accept)
+
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(confirm_btn)
+        body_lay.addLayout(btn_row)
+        lay.addWidget(body)
 
 
 class DurationChip(QWidget):

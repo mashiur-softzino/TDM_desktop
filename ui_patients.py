@@ -494,16 +494,29 @@ class PatientRow(QFrame):
 
 class PatientsListCard(Card):
     search_changed = pyqtSignal(str)
+    page_changed = pyqtSignal()
 
     def __init__(self, title="Sample List", empty_text="No saved samples yet.", action_width=150, parent=None, row_type='sample'):
         super().__init__(title, "mdi6.format-list-bulleted-square", icon_color=BLUE, parent=parent)
         self.setGraphicsEffect(None)
         self._action_width = action_width
         self._row_type = row_type
+        self._page_index = 0
+        badge_bg = "#16A34A" if row_type == 'sample' else "#FBBF24"
+        badge_border = "#DCFCE7" if row_type == 'sample' else "#FFF7E8"
+        self._count_badge = QLabel("0")
+        self._count_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._count_badge.setFixedSize(24, 22)
+        self._count_badge.setStyleSheet(
+            f"background: {badge_bg}; color: white; border: 2px solid {badge_border}; "
+            "border-radius: 11px; font-size: 11px; font-weight: bold;"
+        )
+        if self._header_lay is not None:
+            self._header_lay.insertWidget(max(0, self._header_lay.count() - 1), self._count_badge)
 
         # ── Search bar (in header, right side) ──────────
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search...")
+        self._search_edit.setPlaceholderText("Search by name or patient ID")
         self._search_edit.setStyleSheet(f"""
             QLineEdit {{
                 background: transparent;
@@ -513,11 +526,23 @@ class PatientsListCard(Card):
                 color: {TEXT_CLR};
             }}
         """)
-        self._search_edit.textChanged.connect(self.search_changed)
+        self._search_edit.textChanged.connect(self._on_search_text_changed)
 
         search_icon = QLabel()
         search_icon.setPixmap(qta.icon("mdi6.magnify", color="#9BB0C8").pixmap(14, 14))
         search_icon.setStyleSheet("background: transparent;")
+
+        self._clear_search_btn = QPushButton()
+        self._clear_search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_search_btn.setFixedSize(18, 18)
+        self._clear_search_btn.setIcon(qta.icon("mdi6.close-circle", color="#94A3B8"))
+        self._clear_search_btn.setIconSize(self._clear_search_btn.size() * 0.9)
+        self._clear_search_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: none; border-radius: 9px; }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
+        self._clear_search_btn.clicked.connect(self.clear_search)
+        self._clear_search_btn.hide()
 
         search_wrap = QFrame()
         search_wrap.setFixedWidth(220)
@@ -539,10 +564,12 @@ class PatientsListCard(Card):
         sw_lay.setSpacing(6)
         sw_lay.addWidget(search_icon)
         sw_lay.addWidget(self._search_edit)
+        sw_lay.addWidget(self._clear_search_btn)
 
         if self._header_lay is not None:
             self._header_lay.addWidget(search_wrap)
 
+        self._empty_text = empty_text
         self._empty = QLabel(empty_text)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -598,12 +625,128 @@ class PatientsListCard(Card):
         self._rows_lay.setSpacing(2)
         self._table_lay.addWidget(self._rows_host)
 
+        self._pagination = QFrame()
+        self._pagination.setObjectName("pagination")
+        self._pagination.setStyleSheet(f"""
+            QFrame#pagination {{
+                background: white;
+                border: 1px solid #E2E8F0;
+                border-radius: 14px;
+            }}
+            QLabel#pageInfo {{
+                color: {LABEL_CLR};
+                font-size: 12px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        self._pagination_lay = QHBoxLayout(self._pagination)
+        self._pagination_lay.setContentsMargins(12, 8, 12, 8)
+        self._pagination_lay.setSpacing(8)
+        self._table_lay.addWidget(self._pagination)
+
         self.body().addWidget(self._empty)
         self.body().addWidget(self._table)
 
     def search_text(self) -> str:
         return self._search_edit.text().strip().lower()
 
+    def _on_search_text_changed(self, text: str):
+        self._page_index = 0
+        self._clear_search_btn.setVisible(bool(text.strip()))
+        self.search_changed.emit(text)
+
+    def clear_search(self):
+        self._search_edit.clear()
+
+    def page_index(self) -> int:
+        return self._page_index
+
+    def set_page_index(self, page_index: int):
+        self._page_index = max(0, page_index)
+        self.page_changed.emit()
+
+    def clamp_page_index(self, page_count: int):
+        max_index = max(0, page_count - 1)
+        if self._page_index > max_index:
+            self._page_index = max_index
+
+    def set_pagination(self, page_index: int, page_count: int, total_count: int, page_size: int):
+        while self._pagination_lay.count():
+            item = self._pagination_lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if page_count <= 1:
+            self._pagination.hide()
+            return
+
+        self._pagination.show()
+        first_item = page_index * page_size + 1
+        last_item = min(total_count, first_item + page_size - 1)
+        info = QLabel(f"{first_item}-{last_item} of {total_count}")
+        info.setObjectName("pageInfo")
+        self._pagination_lay.addWidget(info)
+        self._pagination_lay.addStretch()
+
+        def make_btn(label, target=None, active=False, enabled=True, icon_name=None):
+            btn = QPushButton(label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor if enabled and not active else Qt.CursorShape.ArrowCursor)
+            btn.setEnabled(enabled)
+            btn.setFixedHeight(30)
+            btn.setMinimumWidth(32)
+            if icon_name:
+                btn.setIcon(qta.icon(icon_name, color="#64748B" if enabled else "#CBD5E1"))
+            if active:
+                style = f"background: {BLUE}; color: white; border: 1px solid {BLUE};"
+            else:
+                style = "background: #F8FAFC; color: #334155; border: 1px solid #D8E2EF;"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    {style}
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: #E8F0FE;
+                    color: {BLUE};
+                    border: 1px solid #BBD3FF;
+                }}
+                QPushButton:disabled {{
+                    background: #F1F5F9;
+                    color: #94A3B8;
+                    border: 1px solid #E2E8F0;
+                }}
+            """)
+            if target is not None and not active:
+                btn.clicked.connect(lambda: self.set_page_index(target))
+            return btn
+
+        self._pagination_lay.addWidget(make_btn("", page_index - 1, enabled=page_index > 0, icon_name="mdi6.chevron-left"))
+
+        pages = []
+        if page_count <= 5:
+            pages = list(range(page_count))
+        else:
+            start = max(0, min(page_index - 2, page_count - 5))
+            pages = list(range(start, start + 5))
+        for page in pages:
+            self._pagination_lay.addWidget(make_btn(str(page + 1), page, active=(page == page_index)))
+
+        self._pagination_lay.addWidget(make_btn("", page_index + 1, enabled=page_index < page_count - 1, icon_name="mdi6.chevron-right"))
+
+    def set_count(self, count: int):
+        self._count_badge.setText(str(count))
+
+    def set_empty_text(self, text: str | None = None):
+        self._empty.setText(text or self._empty_text)
+
     def set_empty_visible(self, visible: bool):
         self._empty.setVisible(visible)
         self._table.setVisible(not visible)
+        if visible:
+            self._pagination.hide()

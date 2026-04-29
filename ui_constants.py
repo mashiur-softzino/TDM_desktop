@@ -75,6 +75,8 @@ QLineEdit {{
     padding: 10px 14px;
     font-size: 14px;
     color: {TEXT_CLR};
+    selection-background-color: {BLUE};
+    selection-color: white;
 }}
 QLineEdit:focus {{
     border: 1.5px solid {BLUE};
@@ -194,7 +196,8 @@ QPushButton#printBtn {{
     font-weight: bold;
 }}
 QPushButton#printBtn:hover {{
-    background: #FFF7ED;
+    background: #EA580C;
+    color: white;
 }}
 QPushButton#printBtn:disabled {{
     background: #FFF7ED;

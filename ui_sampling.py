@@ -91,6 +91,8 @@ class SampleRow(QFrame):
                 font-size: 14px;
                 font-weight: bold;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:focus {{
                 background: #FED7AA;
@@ -118,6 +120,8 @@ class SampleRow(QFrame):
                 padding: 9px 16px;
                 font-size: 14px;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:focus {{
                 background: white;
@@ -518,13 +522,16 @@ class MedAddModal(QDialog):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(40)
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white; color: {LABEL_CLR};
-                border: 1.5px solid {BORDER}; border-radius: 10px;
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEE2E2; color: #B91C1C;
+                border: 1.5px solid #FCA5A5; border-radius: 10px;
                 font-size: 13px; padding: 0 20px;
-            }}
-            QPushButton:hover {{ background: #F4F8FC; }}
+            }
+            QPushButton:hover {
+                background: #DC2626; color: white;
+                border: 1.5px solid #B91C1C;
+            }
         """)
         cancel_btn.clicked.connect(self.reject)
 
@@ -1073,10 +1080,10 @@ class MedicationSelector(QFrame):
         self._tags_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         self._tags_scroll = QScrollArea()
-        self._tags_scroll.setWidgetResizable(True)
+        self._tags_scroll.setWidgetResizable(False)
         self._tags_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._tags_scroll.setFixedHeight(52)
-        self._tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._tags_scroll.setFixedHeight(60)
+        self._tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._tags_scroll.setWidget(self._tags_widget)
         self._tags_scroll.setStyleSheet("""
@@ -1304,4 +1311,30 @@ class MedicationSelector(QFrame):
     def _update_tags_visibility(self):
         has_tags = bool(self._selected)
         self._tags_scroll.setVisible(has_tags)
+        if not has_tags:
+            self._tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            return
+        self._tags_layout.activate()
+        spacing = self._tags_layout.spacing()
+        margins = self._tags_layout.contentsMargins()
+        content_width = margins.left() + margins.right()
+        visible_count = 0
+        for i in range(self._tags_layout.count()):
+            item = self._tags_layout.itemAt(i)
+            widget = item.widget()
+            if widget is not None:
+                content_width += widget.sizeHint().width()
+                visible_count += 1
+        if visible_count > 1:
+            content_width += spacing * (visible_count - 1)
+        viewport_width = self._tags_scroll.viewport().width()
+        width = max(viewport_width, content_width + 12)
+        self._tags_widget.setMinimumWidth(width)
+        self._tags_widget.setFixedSize(width, max(36, self._tags_scroll.viewport().height()))
+        self._tags_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+            if content_width > viewport_width
+            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._tags_scroll.horizontalScrollBar().setValue(self._tags_scroll.horizontalScrollBar().maximum())
         self._hide_dropdown()

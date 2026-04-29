@@ -53,8 +53,12 @@ def build_report_widget(patient, pk, interp, times, concs):
     h("Patient Details", 12)
     row("Patient Name:",    patient.get('name', 'N/A'))
     row("Age:",             f"{patient.get('age', 'N/A')} years")
-    row("Weight:",          f"{patient.get('weight', 'N/A')} kg")
-    row("Patient Phone:",   patient.get('hosp_id', 'N/A'))
+    row("Gender:",          patient.get('sex', 'N/A'))
+    row("Referred By:",     patient.get('dept', 'N/A'))
+    row("Invoice Number:",  patient.get('hosp_id', 'N/A'))
+    row("Invoice Date:",    patient.get('weight', 'N/A'))
+    row("Report Number:",   patient.get('ward', 'N/A'))
+    row("Delivery Date:",   patient.get('delivery_date', 'N/A'))
     row("Diagnosis:",       patient.get('diag', 'N/A'))
     row("Date of Transplant:", patient.get('tx_date', 'N/A'))
     row("Medications:",     patient.get('med', 'N/A'))
@@ -64,7 +68,7 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Requested Drug:",            patient.get('drug', 'N/A'))
     row("MPA Preparation:",           patient.get('preparation', 'N/A'))
     row("Dose of Requested Drug:",    patient.get('dose', 'N/A'))
-    row("Dose Date & Time:",          patient.get('dose_dt', 'N/A'))
+    row("Date & Time of Dose:",          patient.get('dose_dt', 'N/A'))
     row("Sample Collection Date:",    patient.get('sample_collection_date', 'N/A'))
     times_str = "Trough, " + ", ".join(str(t) for t in times[1:]) + " hours post dose." if len(times) > 1 else "Trough"
     row("Time of samples:", times_str)
@@ -215,10 +219,11 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         '</div>',
         '<div class="patient-box">',
         '<div class="meta-grid">',
-        detail_row("Patient Name", patient.get('name', 'N/A'), "Patient Phone", patient.get('hosp_id', 'N/A')),
-        detail_row("Age (years)", patient.get('age', 'N/A'), "Date of Transplant", patient.get('tx_date', 'N/A')),
-        detail_row("Sex", patient.get('sex', 'N/A')),
-        detail_row("Weight (Kg)", patient.get('weight', 'N/A')),
+        detail_row("Patient Name", patient.get('name', 'N/A'), "Age (years)", patient.get('age', 'N/A')),
+        detail_row("Gender", patient.get('sex', 'N/A'), "Referred By", patient.get('dept', 'N/A')),
+        detail_row("Invoice Number", patient.get('hosp_id', 'N/A'), "Invoice Date", patient.get('weight', 'N/A')),
+        detail_row("Report Number", patient.get('ward', 'N/A'), "Delivery Date", patient.get('delivery_date', 'N/A')),
+        detail_row("Date of Transplant", patient.get('tx_date', 'N/A')),
         '</div>',
         f'<div class="single-row"><span class="grid-label">Diagnosis</span><span class="grid-value">{escape(patient.get("diag", "N/A"))}</span></div>',
         f'<div class="single-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(patient.get("med", "N/A"))}</span></div>',

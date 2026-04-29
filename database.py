@@ -222,7 +222,8 @@ def init_db():
                 ward       TEXT,
                 dept       TEXT,
                 diagnosis  TEXT,
-                tx_date    TEXT
+                tx_date    TEXT,
+                delivery_date TEXT
             );
 
             CREATE TABLE IF NOT EXISTS records (
@@ -293,6 +294,7 @@ def init_db():
                 dept                   TEXT,
                 diagnosis              TEXT,
                 tx_date                TEXT,
+                delivery_date          TEXT,
                 drug                   TEXT,
                 preparation            TEXT,
                 dose                   TEXT,
@@ -306,6 +308,9 @@ def init_db():
         # Migrate: add pid column if missing (existing databases)
         if not _column_exists(conn, 'patients', 'pid'):
             conn.execute("ALTER TABLE patients ADD COLUMN pid TEXT")
+            conn.commit()
+        if not _column_exists(conn, 'patients', 'delivery_date'):
+            conn.execute("ALTER TABLE patients ADD COLUMN delivery_date TEXT")
             conn.commit()
         if not _column_exists(conn, 'records', 'report_path'):
             conn.execute("ALTER TABLE records ADD COLUMN report_path TEXT")
@@ -330,6 +335,9 @@ def init_db():
             conn.commit()
         if not _column_exists(conn, 'drafts', 'concs_json'):
             conn.execute("ALTER TABLE drafts ADD COLUMN concs_json TEXT")
+            conn.commit()
+        if not _column_exists(conn, 'drafts', 'delivery_date'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN delivery_date TEXT")
             conn.commit()
         if not _column_exists(conn, 'pk_results', 'auc_lss'):
             conn.execute("ALTER TABLE pk_results ADD COLUMN auc_lss REAL")
@@ -361,12 +369,30 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
             "SELECT id FROM patients WHERE hosp_no = ?", (hosp_no,)
         ).fetchone()
         if row:
+            conn.execute(
+                """UPDATE patients
+                   SET name = ?, age = ?, sex = ?, weight = ?, ward = ?, dept = ?,
+                       diagnosis = ?, tx_date = ?, delivery_date = ?
+                   WHERE id = ?""",
+                (
+                    patient.get('name'),
+                    patient.get('age'),
+                    patient.get('sex'),
+                    patient.get('weight'),
+                    patient.get('ward'),
+                    patient.get('dept'),
+                    patient.get('diag'),
+                    patient.get('tx_date'),
+                    patient.get('delivery_date'),
+                    row['id'],
+                )
+            )
             return row['id']
 
     pid = _generate_pid()
     cursor = conn.execute(
-        """INSERT INTO patients (pid, hosp_no, name, age, sex, weight, ward, dept, diagnosis, tx_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO patients (pid, hosp_no, name, age, sex, weight, ward, dept, diagnosis, tx_date, delivery_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             pid,
             hosp_no if hosp_no and hosp_no != 'N/A' else None,
@@ -378,6 +404,7 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
             patient.get('dept'),
             patient.get('diag'),
             patient.get('tx_date'),
+            patient.get('delivery_date'),
         )
     )
     return cursor.lastrowid
@@ -404,6 +431,7 @@ def _row_to_snapshot(record: sqlite3.Row, points: list, pk_row) -> dict:
         'sample_collection_date': record['sample_collection_date'] or '',
         'diag':                   record['diagnosis']              or 'N/A',
         'tx_date':                record['tx_date']                or '',
+        'delivery_date':          record['delivery_date']          or '',
         'med':                    record['co_medications']         or 'N/A',
     }
 
@@ -465,6 +493,7 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
         'sample_collection_date': row['sample_collection_date'] or '',
         'diag':                   row['diagnosis']              or 'N/A',
         'tx_date':                row['tx_date']                or '',
+        'delivery_date':          row['delivery_date']          or '',
         'med':                    row['co_medications']         or 'N/A',
     }
 
@@ -508,9 +537,9 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
     conn.execute(
         """INSERT OR REPLACE INTO drafts
            (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
-            name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date,
+            name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date, delivery_date,
             drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             snapshot['id'],
             snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
@@ -528,6 +557,7 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
             patient.get('dept'),
             patient.get('diag'),
             patient.get('tx_date'),
+            patient.get('delivery_date'),
             patient.get('drug'),
             patient.get('preparation'),
             patient.get('dose'),
@@ -545,7 +575,7 @@ def _migrate_legacy_drafts(conn: sqlite3.Connection):
         SELECT r.id, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json,
                r.drug, r.preparation, r.dose, r.dose_dt, r.sample_collection_date,
                r.co_medications, r.scheme, r.trough,
-               p.hosp_no, p.name, p.age, p.sex, p.weight, p.ward, p.dept, p.diagnosis, p.tx_date
+               p.hosp_no, p.name, p.age, p.sex, p.weight, p.ward, p.dept, p.diagnosis, p.tx_date, p.delivery_date
         FROM records r
         LEFT JOIN patients p ON r.patient_id = p.id
         WHERE r.record_type = 'draft'
@@ -573,6 +603,7 @@ def _migrate_legacy_drafts(conn: sqlite3.Connection):
                 'dept': row['dept'] or 'N/A',
                 'diag': row['diagnosis'] or 'N/A',
                 'tx_date': row['tx_date'] or '',
+                'delivery_date': row['delivery_date'] or '',
                 'drug': row['drug'] or '',
                 'preparation': row['preparation'] or '',
                 'dose': row['dose'] or '',
@@ -687,7 +718,7 @@ def load_all() -> tuple[list, list]:
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
                    r.scheme, r.trough,
                    p.pid, p.hosp_no, p.name, p.age, p.sex, p.weight,
-                   p.ward, p.dept, p.diagnosis, p.tx_date
+                   p.ward, p.dept, p.diagnosis, p.tx_date, p.delivery_date
             FROM   records r
             LEFT JOIN patients p ON r.patient_id = p.id
             ORDER  BY r.saved_at ASC, r.id ASC
@@ -717,7 +748,7 @@ def load_all() -> tuple[list, list]:
 
         draft_rows = conn.execute("""
             SELECT id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
-                   name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date,
+                   name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date, delivery_date,
                    drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough
             FROM drafts
             ORDER BY saved_at ASC, id ASC

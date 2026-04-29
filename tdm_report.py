@@ -28,7 +28,8 @@ from ui_constants import (BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CL
                            sampling_times_for_duration, make_shadow, small_label, value_label)
 from ui_widgets import (Card, ToggleButton, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
-                        MonthOnlyCalendar, IconCircle, StatBox, ToastMessage)
+                        MonthOnlyCalendar, IconCircle, StatBox, ToastMessage,
+                        ConfirmActionModal)
 from ui_sampling import (ROW_COLORS, DEFAULT_MEDICATIONS, SampleRow, ModernSampleTable,
                          GradientCanvas, MedTag, MedAddModal, MedicationOptionRow,
                          MedicationEmptyRow, MedicationListWidget, MedicationSelector,
@@ -204,6 +205,14 @@ class TDMMainWindow(QMainWindow):
 
         patient_actions = QHBoxLayout()
         patient_actions.addStretch()
+        self.draft_btn = QPushButton("Draft")
+        self.draft_btn.setObjectName("printBtn")
+        self.draft_btn.setFixedHeight(40)
+        self.draft_btn.setEnabled(False)
+        self.draft_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
+        self.draft_btn.clicked.connect(self._save_draft)
+        patient_actions.addWidget(self.draft_btn)
+
         next_btn = QPushButton("Continue to Sampling  →")
         next_btn.setFixedHeight(40)
         next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -256,13 +265,13 @@ class TDMMainWindow(QMainWindow):
         self.calc_btn.clicked.connect(self._calculate)
         calc_row.addWidget(self.calc_btn)
 
-        self.draft_btn = QPushButton("Draft")
-        self.draft_btn.setObjectName("printBtn")
-        self.draft_btn.setFixedHeight(40)
-        self.draft_btn.setEnabled(False)
-        self.draft_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
-        self.draft_btn.clicked.connect(self._save_draft)
-        calc_row.addWidget(self.draft_btn)
+        self.sampling_draft_btn = QPushButton("Draft")
+        self.sampling_draft_btn.setObjectName("printBtn")
+        self.sampling_draft_btn.setFixedHeight(40)
+        self.sampling_draft_btn.setEnabled(False)
+        self.sampling_draft_btn.setCursor(Qt.CursorShape.ForbiddenCursor)
+        self.sampling_draft_btn.clicked.connect(self._save_draft)
+        calc_row.addWidget(self.sampling_draft_btn)
 
         sampling_step_lay.addLayout(calc_row)
         self.report_step_stack.addWidget(sampling_step)
@@ -293,6 +302,7 @@ class TDMMainWindow(QMainWindow):
         lay.setSpacing(20)
         self.sample_list_card = PatientsListCard("Sample List", "No saved samples yet.", action_width=150, row_type='sample')
         self.sample_list_card.search_changed.connect(lambda _: self._refresh_patients_list())
+        self.sample_list_card.page_changed.connect(self._refresh_patients_list)
         lay.addWidget(self.sample_list_card)
         return page
 
@@ -303,6 +313,7 @@ class TDMMainWindow(QMainWindow):
         lay.setSpacing(20)
         self.draft_list_card = PatientsListCard("Draft List", "No drafts yet.", action_width=84, row_type='draft')
         self.draft_list_card.search_changed.connect(lambda _: self._refresh_patients_list())
+        self.draft_list_card.page_changed.connect(self._refresh_patients_list)
         lay.addWidget(self.draft_list_card)
         return page
 
@@ -342,38 +353,18 @@ class TDMMainWindow(QMainWindow):
             btn.setFlat(True)
             btn.setMinimumWidth(122)
 
-        self.patients_badge = QLabel("0")
-        self.patients_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.patients_badge.setFixedSize(18, 18)
-        self.patients_badge.setStyleSheet(
-            "background: #16A34A; color: white; border: 2px solid #DCFCE7; border-radius: 9px; font-size: 10px; font-weight: bold;"
-        )
-
-        self.drafts_badge = QLabel("0")
-        self.drafts_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.drafts_badge.setFixedSize(18, 18)
-        self.drafts_badge.setStyleSheet(
-            "background: #FBBF24; color: white; border: 2px solid #FFF7E8; border-radius: 9px; font-size: 10px; font-weight: bold;"
-        )
-
-        badge_row = QHBoxLayout()
-        badge_row.setContentsMargins(0, 0, 0, 0)
-        badge_row.setSpacing(8)
-        badge_row.addWidget(self.patients_tab_btn)
-        badge_row.addWidget(self.patients_badge)
-        badge_row.addWidget(self.drafts_tab_btn)
-        badge_row.addWidget(self.drafts_badge)
-        badge_row.addStretch()
-
-        container = QWidget()
-        container.setLayout(badge_row)
-        shell_lay.addWidget(container)
+        shell_lay.addWidget(self.patients_tab_btn)
+        shell_lay.addWidget(self.drafts_tab_btn)
 
         row.addWidget(shell)
         row.addStretch()
         return wrap
 
     def _switch_page(self, index):
+        if index == 1 and hasattr(self, 'draft_list_card'):
+            self.draft_list_card.clear_search()
+        elif index == 2 and hasattr(self, 'sample_list_card'):
+            self.sample_list_card.clear_search()
         for i in range(self.page_stack.count()):
             w = self.page_stack.widget(i)
             if i == index:
@@ -493,20 +484,14 @@ class TDMMainWindow(QMainWindow):
         lay.addSpacing(14)
 
         # ── Title ────────────────────────────────
-        title_col = QVBoxLayout()
-        title_col.setSpacing(2)
-        t1 = QLabel("TDM Report")
+        title_col = QHBoxLayout()
+        title_col.setSpacing(0)
+        t1 = QLabel("Therapeutic Drug Monitoring")
         t1.setStyleSheet(
             "color: white; font-size: 16px; font-weight: 700; "
             "letter-spacing: 0.3px; background: transparent;"
         )
-        t2 = QLabel("Therapeutic Drug Monitoring")
-        t2.setStyleSheet(
-            "color: rgba(255,255,255,0.45); font-size: 10px; "
-            "letter-spacing: 0.5px; background: transparent;"
-        )
         title_col.addWidget(t1)
-        title_col.addWidget(t2)
         lay.addLayout(title_col)
         lay.addSpacing(20)
 
@@ -565,9 +550,10 @@ class TDMMainWindow(QMainWindow):
         lay.setSpacing(10)
 
         mark = QLabel()
-        mark.setFixedSize(56, 28)
+        mark.setFixedSize(118, 24)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_path = Path(__file__).resolve().with_name("softzino_logo.png")
+        logo_base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        logo_path = logo_base / "softzino.png"
         pixmap = QPixmap(str(logo_path))
         if not pixmap.isNull():
             image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
@@ -578,23 +564,10 @@ class TDMMainWindow(QMainWindow):
                         color.setAlpha(0)
                         image.setPixelColor(x, y, color)
             cleaned = QPixmap.fromImage(image)
-            mark.setPixmap(cleaned.scaled(56, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            mark.setPixmap(cleaned.scaled(118, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         mark.setStyleSheet("background: transparent;")
         lay.addWidget(mark)
 
-        brand_col = QVBoxLayout()
-        brand_col.setSpacing(0)
-        brand = QLabel("SOFTZINO")
-        brand.setStyleSheet(
-            "color: #2D8CFF; font-size: 13px; font-weight: 800; letter-spacing: 0.35px; background: transparent;"
-        )
-        tagline = QLabel("Innovation that Differentiates")
-        tagline.setStyleSheet(
-            "color: rgba(191,219,254,0.88); font-size: 8px; font-style: italic; letter-spacing: 0.45px; background: transparent;"
-        )
-        brand_col.addWidget(brand)
-        brand_col.addWidget(tagline)
-        lay.addLayout(brand_col)
         lay.addStretch()
 
         copy = QLabel("Copyright © SOFTZINO. This software is developed and maintained by SOFTZINO.")
@@ -622,6 +595,8 @@ class TDMMainWindow(QMainWindow):
                 font-size: 14px;
                 font-weight: 500;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:hover {{
                 border: 1.5px solid #C3D6EA;
@@ -630,7 +605,8 @@ class TDMMainWindow(QMainWindow):
             QLineEdit:focus {{
                 border: 1.5px solid {BLUE};
                 background: white;
-                selection-background-color: #DDEBFF;
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit::placeholder {{
                 color: #95A3B7;
@@ -645,6 +621,8 @@ class TDMMainWindow(QMainWindow):
                 font-size: 14px;
                 font-weight: 500;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QComboBox:hover {{
                 border: 1.5px solid #C3D6EA;
@@ -695,20 +673,27 @@ class TDMMainWindow(QMainWindow):
             e.setStyleSheet(field_style)
             return e
 
-        self.f_name    = field("Enter patient name")
-        self.f_age     = field("e.g. 45")
-        self.f_weight  = field("e.g. 70")
-        self.f_hosp_no = field("e.g. 01914700094")
-        self.f_hosp_no.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self))
+        self.f_name      = field("Enter patient name")
+        self.f_age       = field("e.g. 45")
+        self.f_name.setMaxLength(30)
+        self.f_age.setMaxLength(3)
+        self.f_age.setValidator(QIntValidator(0, 150, self))
+        self.f_hosp_no     = field("Enter invoice number")
+        self.f_invoice_date = SmartDateEdit()
+        self.f_report_no   = field("Enter report number")
+        self.f_referred_by = field("Enter referred by")
+        self.f_delivery_date = SmartDateEdit()
+        self.f_invoice_date.dateChanged.connect(lambda *_: self._on_data_changed())
+        self.f_delivery_date.dateChanged.connect(lambda *_: self._on_data_changed())
 
         self.f_diag    = field("e.g. Post Renal Transplant")
         self.f_diag.setText("Post Renal Transplant")
-        for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no, self.f_diag]:
+        for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by, self.f_diag]:
             edit.textChanged.connect(self._on_data_changed)
 
         # Sex selector
         self.f_sex = NoWheelComboBox()
-        self.f_sex.addItems(["Choose a sex", "Male", "Female", "Other"])
+        self.f_sex.addItems(["Choose a gender", "Male", "Female", "Other"])
         self.f_sex.setStyleSheet(combo_style)
         self.f_sex.currentTextChanged.connect(self._on_data_changed)
         self.f_sex.setCurrentIndex(0)
@@ -775,15 +760,20 @@ class TDMMainWindow(QMainWindow):
         demo_grid = QGridLayout()
         demo_grid.setSpacing(16)
         demo_grid.setHorizontalSpacing(20)
+        for col in range(4):
+            demo_grid.setColumnStretch(col, 1)
 
-        # Row 0: Name (wide) | Age | Sex
-        add_field(demo_grid, 0, 0, "Patient Name", self.f_name, span=2)
-        add_field(demo_grid, 0, 2, "Age (Years)", self.f_age)
-        add_field(demo_grid, 0, 3, "Sex", self.f_sex)
+        # Row 0: Patient Name | Age | Gender | Referred By
+        add_field(demo_grid, 0, 0, "Patient Name", self.f_name)
+        add_field(demo_grid, 0, 1, "Age (Years)", self.f_age)
+        add_field(demo_grid, 0, 2, "Gender", self.f_sex)
+        add_field(demo_grid, 0, 3, "Referred By", self.f_referred_by)
 
-        # Row 1: Weight | Patient Phone
-        add_field(demo_grid, 1, 0, "Weight (kg)", self.f_weight)
-        add_field(demo_grid, 1, 1, "Patient Phone", self.f_hosp_no, span=2)
+        # Row 1: Invoice Number | Invoice Date | Report Number | Delivery Date
+        add_field(demo_grid, 1, 0, "Invoice Number", self.f_hosp_no)
+        add_field(demo_grid, 1, 1, "Invoice Date", self.f_invoice_date)
+        add_field(demo_grid, 1, 2, "Report Number", self.f_report_no)
+        add_field(demo_grid, 1, 3, "Delivery Date", self.f_delivery_date)
 
         demographics_lay.addLayout(demo_grid)
         card.body().addWidget(demographics_box)
@@ -878,6 +868,8 @@ class TDMMainWindow(QMainWindow):
                 font-size: 14px;
                 font-weight: 500;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:hover {{
                 background: white;
@@ -995,7 +987,7 @@ class TDMMainWindow(QMainWindow):
         add_meta(0, 0, "Requested Drug", self.f_drug, required=True)
         add_meta(0, 1, "Requested Drug Preparation", self.f_preparation, required=True)
         add_meta(0, 2, "Dose of Requested Drug", self.f_dose, required=True)
-        add_meta(0, 3, "Dose Date & Time", self.f_dose_dt)
+        add_meta(0, 3, "Date & Time of Dose", self.f_dose_dt)
         add_meta(1, 0, "Sample Collection Date", self.f_sample_collection_date)
         add_meta(1, 1, "Time Duration (Post-Tx)", self.f_tx_duration)
         meta_box_lay.addLayout(meta_grid)
@@ -1083,6 +1075,8 @@ class TDMMainWindow(QMainWindow):
                 font-size: 18px;
                 font-weight: bold;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:focus {{ border: 2px solid #EA580C; }}
         """)
@@ -1115,6 +1109,8 @@ class TDMMainWindow(QMainWindow):
                 font-size: 18px;
                 font-weight: bold;
                 color: {TEXT_CLR};
+                selection-background-color: {BLUE};
+                selection-color: white;
             }}
             QLineEdit:focus {{
                 border: 2px solid #EA580C;
@@ -1287,25 +1283,36 @@ class TDMMainWindow(QMainWindow):
         self._on_data_changed()
 
     def _add_duration_option(self):
-        dlg = DurationEditModal("Add Sampling Duration", "Save Duration", parent=self)
+        dlg = DurationEditModal("Add Sample Points", "Save", parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         candidate = dlg.get_value()
         if not candidate:
+            self._show_toast("Invalid sample points", "Sample points must be between 1 and 12.", tone="warning")
             return
         if candidate in self._duration_options:
-            self._show_toast("Already exists", f"{candidate}h is already in the list.")
+            self._show_toast("Already added", f"{candidate} sample points is already added", tone="warning")
             return
         self._duration_options.append(candidate)
         self._scheme_rows_cache[candidate] = self._rows_payload_for_duration(candidate)
         self._set_duration_options(self._duration_options, selected=candidate)
         self._populate_table(candidate)
         self._on_data_changed()
-        self._show_toast("Duration added", f"{candidate}h sampling duration added.")
+        self._show_toast("Sample points added", f"{candidate} Sample points is added")
 
     def _remove_duration_option(self, duration):
         if len(self._duration_options) <= 1:
             self._show_toast("Cannot remove", "At least one sampling duration is required.", tone="warning")
+            self._refresh_duration_controls(selected=self._current_scheme)
+            return
+        dlg = ConfirmActionModal(
+            "Delete Sample Points",
+            f"Are you sure you want to delete {duration} sample points?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             self._refresh_duration_controls(selected=self._current_scheme)
             return
         self._duration_options = [d for d in self._duration_options if d != duration]
@@ -1316,7 +1323,7 @@ class TDMMainWindow(QMainWindow):
         self._set_duration_options(self._duration_options, selected=next_duration)
         self._populate_table(next_duration)
         self._on_data_changed()
-        self._show_toast("Duration removed", f"{duration}h sampling duration removed.")
+        self._show_toast("Sample points deleted", f"{duration} Sample points is deleted")
 
     # ──────────────────────────────────────
     # Event handlers
@@ -1394,11 +1401,12 @@ class TDMMainWindow(QMainWindow):
         return {
             'name': self.f_name.text().strip() or 'N/A',
             'age': self.f_age.text().strip() or 'N/A',
-            'sex': '' if self.f_sex.currentText() == "Choose a sex" else self.f_sex.currentText(),
-            'weight': self.f_weight.text().strip() or 'N/A',
+            'sex': '' if self.f_sex.currentText() == "Choose a gender" else self.f_sex.currentText(),
+            'weight': self.f_invoice_date.date().toString("dd.MM.yyyy"),
             'hosp_id': self.f_hosp_no.text().strip() or 'N/A',
-            'ward': 'N/A',
-            'dept': 'N/A',
+            'ward': self.f_report_no.text().strip() or 'N/A',
+            'dept': self.f_referred_by.text().strip() or 'N/A',
+            'delivery_date': self.f_delivery_date.date().toString("dd.MM.yyyy"),
             'drug': self.f_drug.currentText().strip(),
             'preparation': self.f_preparation.text().strip(),
             'dose': self.f_dose.text().strip(),
@@ -1495,11 +1503,14 @@ class TDMMainWindow(QMainWindow):
             draft_enabled = draft_enabled and self._form_signature() != getattr(self, '_loaded_form_signature', None)
         self.calc_btn.setEnabled(enabled)
         self.calc_btn.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor)
-        self.draft_btn.setVisible(not is_editing_saved_sample)
-        self.draft_btn.setEnabled(draft_enabled)
-        self.draft_btn.setCursor(Qt.CursorShape.PointingHandCursor if draft_enabled else Qt.CursorShape.ForbiddenCursor)
+        for button in [self.draft_btn, getattr(self, 'sampling_draft_btn', None)]:
+            if button is None:
+                continue
+            button.setVisible(not is_editing_saved_sample)
+            button.setEnabled(draft_enabled)
+            button.setCursor(Qt.CursorShape.PointingHandCursor if draft_enabled else Qt.CursorShape.ForbiddenCursor)
 
-    _LIST_PAGE_SIZE = 50
+    _LIST_PAGE_SIZE = 10
 
     def _refresh_patients_list(self):
         if not hasattr(self, 'sample_list_card'):
@@ -1528,12 +1539,18 @@ class TDMMainWindow(QMainWindow):
                     widget.deleteLater()
 
             if not visible:
+                card.set_empty_text("No data found" if query else None)
                 card.set_empty_visible(True)
                 return
 
+            card.set_empty_text()
             card.set_empty_visible(False)
-            page = visible[:self._LIST_PAGE_SIZE]
-            remaining = visible[self._LIST_PAGE_SIZE:]
+            page_count = (len(visible) + self._LIST_PAGE_SIZE - 1) // self._LIST_PAGE_SIZE
+            card.clamp_page_index(page_count)
+            page_index = card.page_index()
+            start = page_index * self._LIST_PAGE_SIZE
+            page = visible[start:start + self._LIST_PAGE_SIZE]
+            remaining = []
 
             for snapshot in page:
                 row = PatientRow(snapshot, row_type=row_type)
@@ -1586,6 +1603,7 @@ class TDMMainWindow(QMainWindow):
                 )
             else:
                 rows_layout.addStretch()
+            card.set_pagination(page_index, page_count, len(visible), self._LIST_PAGE_SIZE)
 
         populate(
             self.sample_list_card,
@@ -1598,9 +1616,9 @@ class TDMMainWindow(QMainWindow):
         )
         if hasattr(self, 'draft_list_card'):
             populate(self.draft_list_card, self._drafts, self._load_draft, self._delete_draft, row_type='draft')
-        self.patients_badge.setText(str(len(self._saved_patients)))
-        if hasattr(self, 'drafts_badge'):
-            self.drafts_badge.setText(str(len(self._drafts)))
+        self.sample_list_card.set_count(len(self._saved_patients))
+        if hasattr(self, 'draft_list_card'):
+            self.draft_list_card.set_count(len(self._drafts))
 
     def _save_draft(self):
         snapshot = self._snapshot_payload()
@@ -1665,8 +1683,16 @@ class TDMMainWindow(QMainWindow):
         patient = snapshot.get('patient', {})
         self.f_name.setText(patient.get('name', '') if patient.get('name') != 'N/A' else '')
         self.f_age.setText(patient.get('age', '') if patient.get('age') != 'N/A' else '')
-        self.f_weight.setText(patient.get('weight', '') if patient.get('weight') != 'N/A' else '')
         self.f_hosp_no.setText(patient.get('hosp_id', '') if patient.get('hosp_id') != 'N/A' else '')
+        self.f_report_no.setText(patient.get('ward', '') if patient.get('ward') != 'N/A' else '')
+        self.f_referred_by.setText(patient.get('dept', '') if patient.get('dept') != 'N/A' else '')
+
+        invoice_date = QDate.fromString(patient.get('weight', ''), "dd.MM.yyyy")
+        if invoice_date.isValid():
+            self.f_invoice_date.setDate(invoice_date)
+        delivery_date = QDate.fromString(patient.get('delivery_date', ''), "dd.MM.yyyy")
+        if delivery_date.isValid():
+            self.f_delivery_date.setDate(delivery_date)
 
         sex_value = patient.get('sex', '').strip()
         sex_index = self.f_sex.findText(sex_value) if sex_value else 0
@@ -2019,7 +2045,7 @@ class TDMMainWindow(QMainWindow):
         self._direct_auc_edit.clear()
         if close_results and hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
-        for edit in [self.f_name, self.f_age, self.f_weight, self.f_hosp_no,
+        for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by,
                      self.f_dose,
                      self.f_diag, self.trough_edit]:
             edit.clear()
@@ -2029,6 +2055,8 @@ class TDMMainWindow(QMainWindow):
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
         self.f_tx_date.setDate(QDate.currentDate())
+        self.f_invoice_date.setDate(QDate.currentDate())
+        self.f_delivery_date.setDate(QDate.currentDate())
         self.f_dose_dt.setDateTime(QDateTime.currentDateTime())
         self.f_sample_collection_date.setDate(QDate.currentDate())
         self._populate_table(default_duration)
