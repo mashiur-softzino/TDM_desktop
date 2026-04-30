@@ -292,13 +292,34 @@ class LicenseManager:
             self._persist()
 
     def _load(self):
-        if LICENSE_FILE.exists():
-            try:
-                with open(LICENSE_FILE) as f:
-                    self._data = json.load(f)
+        if not LICENSE_FILE.exists():
+            return
+            
+        try:
+            content = LICENSE_FILE.read_text().strip()
+            if not content:
+                return
+
+            # Try to parse as plain JSON first (migration)
+            if content.startswith('{'):
+                try:
+                    self._data = json.loads(content)
+                    # Migrate to scrambled format immediately
+                    self._persist()
+                    self._hydrate_cached_fields()
+                    return
+                except json.JSONDecodeError:
+                    pass
+            
+            # Unscramble
+            fp = get_fingerprint()
+            unscrambled = self._unscramble(content, fp)
+            if unscrambled:
+                self._data = json.loads(unscrambled)
                 self._hydrate_cached_fields()
-            except Exception:
-                self._data = {}
+        except Exception:
+            self._data = {}
+
 
     def _start_heartbeat(self):
         if self._heartbeat_thread and self._heartbeat_thread.is_alive():
@@ -360,8 +381,35 @@ class LicenseManager:
             pass
 
     def _persist(self):
-        with open(LICENSE_FILE, "w") as f:
-            json.dump(self._data, f, indent=2)
+        try:
+            fp = get_fingerprint()
+            raw_json = json.dumps(self._data)
+            scrambled = self._scramble(raw_json, fp)
+            LICENSE_FILE.write_text(scrambled)
+        except Exception:
+            pass
+
+    def _scramble(self, data: str, key: str) -> str:
+        """Simple XOR-based scrambling using the device fingerprint as key."""
+        key_bytes = key.encode()
+        data_bytes = data.encode()
+        result = bytearray()
+        for i in range(len(data_bytes)):
+            result.append(data_bytes[i] ^ key_bytes[i % len(key_bytes)])
+        return base64.b64encode(result).decode()
+
+    def _unscramble(self, scrambled: str, key: str) -> str:
+        """Reverse of _scramble."""
+        try:
+            key_bytes = key.encode()
+            data_bytes = base64.b64decode(scrambled)
+            result = bytearray()
+            for i in range(len(data_bytes)):
+                result.append(data_bytes[i] ^ key_bytes[i % len(key_bytes)])
+            return result.decode()
+        except Exception:
+            return ""
+
 
     def _hydrate_cached_fields(self):
         claims = self._verified_token_claims()
