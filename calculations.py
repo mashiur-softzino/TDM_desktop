@@ -56,7 +56,8 @@ THERAPEUTIC_RANGES = {
 
 # ─────────────────────────────────────────────────────────────────
 # Published LSS regression equations for MPA AUC₀₋₁₂ estimation
-# Source: Le Meur Y et al., Transplantation 2003
+# Source: Pawinski et al., Ther Drug Monit 2002
+#         Le Meur Y et al., Transplantation 2003
 #         van Hest RM et al., Clin Pharmacokinet 2006
 # ─────────────────────────────────────────────────────────────────
 LSS_EQUATIONS = {
@@ -67,7 +68,7 @@ LSS_EQUATIONS = {
         'intercept': 7.75,
         'coefficients': {0.0: 6.49, 0.5: 0.76, 2.0: 2.43},
         'r2': None,
-        'reference': 'Provided equation',
+        'reference': 'Pawinski et al., Ther Drug Monit 2002',
     },
     # ('TAC', 4): {
     #     'label': '4-point (C₀, C₀.₅, C₁, C₂) — Le Meur 2003 [Tac]',
