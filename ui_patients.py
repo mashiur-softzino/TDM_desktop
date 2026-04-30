@@ -440,9 +440,9 @@ class PatientRow(QFrame):
             row.addWidget(lbl, stretch)
 
         text_cell(str(serial_no or ""), stretch=1, alignment=Qt.AlignmentFlag.AlignCenter)
-        text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=4)
         if row_type == 'sample':
             text_cell(snapshot.get('patient', {}).get('pid', 'N/A'), stretch=4)
+        text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=4)
 
         drug = QLabel(snapshot.get('patient', {}).get('drug', 'N/A'))
         drug.setObjectName("drugBadge")
@@ -516,7 +516,8 @@ class PatientsListCard(Card):
 
         # ── Search bar (in header, right side) ──────────
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search by name or patient ID")
+        placeholder = "Search by name" if self._row_type == 'draft' else "Search by name or patient ID"
+        self._search_edit.setPlaceholderText(placeholder)
         self._search_edit.setStyleSheet(f"""
             QLineEdit {{
                 background: transparent;

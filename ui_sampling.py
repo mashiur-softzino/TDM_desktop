@@ -5,7 +5,7 @@ Sampling-related UI classes: sample table rows, gradient chart, medication selec
 from ui_constants import (
     BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
 )
-from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage
+from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
 import matplotlib
 matplotlib.use('QtAgg')
@@ -1380,16 +1380,24 @@ class MedicationSelector(QFrame):
                 self._show_options(self._filtered_options(self._search.text()))
 
     def _delete_option(self, name: str):
+        dlg = ConfirmActionModal(
+            "Delete Medication",
+            f"Are you sure you want to delete medication '{name}'?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
         delete_medication(name)
         self._all_meds = load_medications()
         if name in self._selected:
             self._remove_tag(name)
         self._show_options(self._filtered_options(self._search.text()))
-        
-        # Show toast
-        if not hasattr(self, '_toast'):
-            self._toast = ToastMessage(self.window())
-        self._toast.show_message("Deleted Successfully", f"Medication '{name}' has been removed.")
+
+        if hasattr(self.window(), "_show_toast"):
+            self.window()._show_toast("Deleted Successfully", f"Medication '{name}' has been removed.")
 
     # ── Tag management ────────────────────────────
     def _add_tag(self, name: str):

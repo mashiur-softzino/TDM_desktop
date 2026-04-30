@@ -185,13 +185,16 @@ class DurationEditModal(QDialog):
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(40)
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white; color: {LABEL_CLR};
-                border: 1.5px solid {BORDER}; border-radius: 10px;
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEE2E2; color: #B91C1C;
+                border: 1.5px solid #FCA5A5; border-radius: 10px;
                 font-size: 13px; padding: 0 20px;
-            }}
-            QPushButton:hover {{ background: #F4F8FC; }}
+            }
+            QPushButton:hover {
+                background: #DC2626; color: white;
+                border: 1.5px solid #B91C1C;
+            }
         """)
         cancel_btn.clicked.connect(self.reject)
 
@@ -248,6 +251,7 @@ class ConfirmActionModal(QDialog):
         message: str,
         confirm_label: str = "Yes",
         cancel_label: str = "No",
+        cancel_tone: str = "neutral",
         parent=None,
     ):
         super().__init__(parent)
@@ -302,14 +306,27 @@ class ConfirmActionModal(QDialog):
         cancel_btn = QPushButton(cancel_label)
         cancel_btn.setFixedHeight(40)
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: white; color: {LABEL_CLR};
-                border: 1.5px solid {BORDER}; border-radius: 10px;
-                font-size: 13px; padding: 0 20px;
-            }}
-            QPushButton:hover {{ background: #F4F8FC; }}
-        """)
+        if cancel_tone == "danger":
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    background: #FEE2E2; color: #B91C1C;
+                    border: 1.5px solid #FCA5A5; border-radius: 10px;
+                    font-size: 13px; padding: 0 20px;
+                }
+                QPushButton:hover {
+                    background: #DC2626; color: white;
+                    border: 1.5px solid #B91C1C;
+                }
+            """)
+        else:
+            cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: white; color: {LABEL_CLR};
+                    border: 1.5px solid {BORDER}; border-radius: 10px;
+                    font-size: 13px; padding: 0 20px;
+                }}
+                QPushButton:hover {{ background: #F4F8FC; }}
+            """)
         cancel_btn.clicked.connect(self.reject)
 
         confirm_btn = QPushButton(confirm_label)
@@ -1065,10 +1082,12 @@ class SmartDateTimeEdit(QWidget):
     def _on_date_clicked(self, date):
         self._dt.setDate(date)
         self._refresh_text()
+        self.dateTimeChanged.emit(self._dt)
 
     def _on_time_changed(self, time):
         self._dt.setTime(time)
         self._refresh_text()
+        self.dateTimeChanged.emit(self._dt)
 
     def _set_now(self):
         self.setDateTime(QDateTime.currentDateTime())

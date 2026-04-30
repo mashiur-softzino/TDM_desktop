@@ -16,7 +16,6 @@ from app_paths import backups_dir, db_file, migrate_legacy_file
 
 DB_FILE = db_file()
 migrate_legacy_file("tdm_report.db", DB_FILE)
-SQLCIPHER_PASSWORD = "TDM_REPORT_SOFTZINO_2026_DB_KEY"
 SQLITE_HEADER = b"SQLite format 3\x00"
 BACKUP_KEEP_COUNT = 5
 DEFAULT_MEDICATIONS_SEED = [
@@ -29,6 +28,20 @@ DEFAULT_MEDICATIONS_SEED = [
     "Calcium + Vitamin D", "Sirolimus", "Everolimus", "Azathioprine",
     "Linagliptin", "Ostoref-D", "Shelcal",
 ]
+
+
+def _build_sqlcipher_password() -> str:
+    """Rebuild the SQLCipher key at runtime so it is not stored as plain text."""
+    mask = 0x37
+    parts = [
+        99, 115, 122, 104, 101, 114, 103, 120, 101, 99, 104,
+        100, 120, 113, 99, 109, 126, 121, 120, 104, 5, 7,
+        5, 1, 104, 115, 117, 104, 124, 114, 110,
+    ]
+    return "".join(chr(value ^ mask) for value in parts)
+
+
+SQLCIPHER_PASSWORD = _build_sqlcipher_password()
 
 
 # ─────────────────────────────────────────

@@ -894,6 +894,7 @@ class TDMMainWindow(QMainWindow):
         self.f_preparation = field("e.g. Mycept-5")
         self.f_preparation.setText("Mycophenolate Mofetil")
         self.f_dose = field("e.g. 540 mg - 720 mg")
+        self.f_dose.setMaxLength(50)
         for edit in [self.f_preparation, self.f_dose]:
             edit.textChanged.connect(self._on_data_changed)
         self.f_dose_dt = SmartDateTimeEdit()
@@ -1403,6 +1404,7 @@ class TDMMainWindow(QMainWindow):
             f"Are you sure you want to delete {duration} sample points?",
             confirm_label="Yes",
             cancel_label="No",
+            cancel_tone="danger",
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -1899,6 +1901,15 @@ class TDMMainWindow(QMainWindow):
 
     def _delete_saved_patient(self, patient_id):
         snapshot = next((p for p in self._saved_patients if p['id'] == patient_id), None)
+        dlg = ConfirmActionModal(
+            "Delete Sample",
+            "Are you sure you want to delete this sample from the Sample List?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
         if snapshot:
             p = snapshot.get('patient', {})
             log_record_deleted(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'))
@@ -1909,6 +1920,15 @@ class TDMMainWindow(QMainWindow):
 
     def _delete_draft(self, patient_id):
         snapshot = next((p for p in self._drafts if p['id'] == patient_id), None)
+        dlg = ConfirmActionModal(
+            "Delete Draft",
+            "Are you sure you want to delete this draft from the Draft List?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
         if snapshot:
             p = snapshot.get('patient', {})
             log_record_deleted(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'))
