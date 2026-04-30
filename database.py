@@ -226,6 +226,13 @@ def init_db():
                 delivery_date TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS doctors (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT NOT NULL,
+                designation    TEXT,
+                signature_path TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS records (
                 id                     TEXT PRIMARY KEY,
                 patient_id             INTEGER REFERENCES patients(id),
@@ -241,7 +248,9 @@ def init_db():
                 sample_collection_date TEXT,
                 co_medications         TEXT,
                 scheme                 INTEGER,
-                trough                 TEXT
+                trough                 TEXT,
+                prepared_by_id         INTEGER REFERENCES doctors(id),
+                checked_by_id          INTEGER REFERENCES doctors(id)
             );
 
             CREATE TABLE IF NOT EXISTS sample_points (
@@ -302,7 +311,9 @@ def init_db():
                 sample_collection_date TEXT,
                 co_medications         TEXT,
                 scheme                 INTEGER,
-                trough                 TEXT
+                trough                 TEXT,
+                prepared_by_id         INTEGER REFERENCES doctors(id),
+                checked_by_id          INTEGER REFERENCES doctors(id)
             );
         """)
         # Migrate: add pid column if missing (existing databases)
@@ -345,9 +356,28 @@ def init_db():
         if not _column_exists(conn, 'pk_results', 'lss_equation'):
             conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
             conn.commit()
+
+        # Doctor migrations
+        if not _column_exists(conn, 'records', 'prepared_by_id'):
+            conn.execute("ALTER TABLE records ADD COLUMN prepared_by_id INTEGER")
+            conn.commit()
+        if not _column_exists(conn, 'records', 'checked_by_id'):
+            conn.execute("ALTER TABLE records ADD COLUMN checked_by_id INTEGER")
+            conn.commit()
+        if not _column_exists(conn, 'drafts', 'prepared_by_id'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN prepared_by_id INTEGER")
+            conn.commit()
+        if not _column_exists(conn, 'drafts', 'checked_by_id'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN checked_by_id INTEGER")
+            conn.commit()
         _migrate_legacy_drafts(conn)
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute("INSERT OR IGNORE INTO medications (name) VALUES (?)", (med,))
+        
+        # Seed doctors if empty
+        if conn.execute("SELECT count(*) FROM doctors").fetchone()[0] == 0:
+            conn.execute("INSERT INTO doctors (name, designation) VALUES (?, ?)", ("Dr. John Doe", "MBBS, MD (Nephrology)"))
+            conn.execute("INSERT INTO doctors (name, designation) VALUES (?, ?)", ("Dr. Jane Smith", "MBBS, MS (Transplant Surgery)"))
         conn.commit()
 
 
@@ -443,6 +473,8 @@ def _row_to_snapshot(record: sqlite3.Row, points: list, pk_row) -> dict:
         'patient':     patient,
         'scheme':      record['scheme'] or 4,
         'trough':      record['trough'] or '',
+        'prepared_by_id': record['prepared_by_id'],
+        'checked_by_id':  record['checked_by_id'],
         'times':       times,
         'concs':       concs,
     }
@@ -505,6 +537,8 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
         'patient':     patient,
         'scheme':      row['scheme'] or 4,
         'trough':      row['trough'] or '',
+        'prepared_by_id': row['prepared_by_id'],
+        'checked_by_id':  row['checked_by_id'],
         'times':       [],
         'concs':       [],
     }
@@ -538,8 +572,8 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
         """INSERT OR REPLACE INTO drafts
            (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
             name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date, delivery_date,
-            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             snapshot['id'],
             snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
@@ -566,6 +600,8 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
             patient.get('med'),
             snapshot.get('scheme'),
             snapshot.get('trough'),
+            snapshot.get('prepared_by_id'),
+            snapshot.get('checked_by_id'),
         )
     )
 
@@ -642,8 +678,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
             """INSERT OR REPLACE INTO records
                (id, patient_id, record_type, saved_at, report_path, sample_rows_json, duration_options_json,
                 drug, preparation, dose, dose_dt,
-                sample_collection_date, co_medications, scheme, trough)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot['id'],
                 patient_id,
@@ -660,6 +696,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                 patient.get('med'),
                 snapshot.get('scheme'),
                 snapshot.get('trough'),
+                snapshot.get('prepared_by_id'),
+                snapshot.get('checked_by_id'),
             )
         )
 
@@ -793,19 +831,70 @@ def load_medications() -> list[str]:
 
 
 def add_medication(name: str) -> bool:
+    name = name.strip()
+    if not name: return False
     with _connect() as conn:
-        cur = conn.execute("INSERT OR IGNORE INTO medications (name) VALUES (?)", (name,))
+        # Case-insensitive check
+        existing = conn.execute("SELECT name FROM medications WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+        if existing:
+            return False
+        cur = conn.execute("INSERT INTO medications (name) VALUES (?)", (name,))
         return cur.rowcount > 0
 
 
-def update_medication(old_name: str, new_name: str):
+def update_medication(old_name: str, new_name: str) -> bool:
+    new_name = new_name.strip()
+    if not new_name: return False
     with _connect() as conn:
+        # Check if the new name exists elsewhere (case-insensitive)
+        existing = conn.execute(
+            "SELECT name FROM medications WHERE name = ? COLLATE NOCASE AND name != ?",
+            (new_name, old_name)
+        ).fetchone()
+        if existing:
+            return False
         conn.execute("UPDATE medications SET name = ? WHERE name = ?", (new_name, old_name))
+        return True
 
 
 def delete_medication(name: str):
     with _connect() as conn:
         conn.execute("DELETE FROM medications WHERE name = ?", (name,))
+
+
+def load_doctors() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM doctors ORDER BY LOWER(name) ASC").fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_doctor_by_id(doctor_id: int) -> dict | None:
+    if not doctor_id: return None
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM doctors WHERE id = ?", (doctor_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def add_doctor(name: str, designation: str, signature_path: str = None) -> int:
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO doctors (name, designation, signature_path) VALUES (?, ?, ?)",
+            (name, designation, signature_path)
+        )
+        return cur.lastrowid
+
+
+def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None):
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE doctors SET name = ?, designation = ?, signature_path = ? WHERE id = ?",
+            (name, designation, signature_path, doctor_id)
+        )
+
+
+def delete_doctor(doctor_id: int):
+    with _connect() as conn:
+        conn.execute("DELETE FROM doctors WHERE id = ?", (doctor_id,))
 
 
 # ─────────────────────────────────────────

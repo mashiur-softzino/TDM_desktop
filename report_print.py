@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from datetime import datetime
+from pathlib import Path
 
 
 def build_report_widget(patient, pk, interp, times, concs):
@@ -103,7 +104,7 @@ def build_report_widget(patient, pk, interp, times, concs):
     return w
 
 
-def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
+def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None, graph_uri=None):
     def fmt(v, d=3):
         return f"{v:.{d}f}" if v is not None else "N/A"
 
@@ -138,6 +139,16 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
             f'{right}'
             '</div>'
         )
+
+    def img_to_base64(path_str):
+        if not path_str: return None
+        path = Path(path_str)
+        if not path.exists(): return None
+        try:
+            with open(path, "rb") as f:
+                return "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+        except Exception:
+            return None
 
     def graph_data_uri():
         fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=170)
@@ -266,9 +277,36 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
         sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>')
     sections += [
         f'<div class="range-note"><strong>Therapeutic Range:</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
-        '</div>',
+        '</div>', # end section-block
+    ]
+
+    # Signature Section
+    sig_html = '<div class="signature-container">'
+    for label, doctor in [("Prepared By", prepared_by), ("Checked By", checked_by)]:
+        sig_html += '<div class="sig-box">'
+        if doctor:
+            sig_b64 = img_to_base64(doctor.get('signature_path'))
+            if sig_b64:
+                sig_html += f'<div class="sig-img-wrap"><img src="{sig_b64}"></div>'
+            else:
+                sig_html += '<div class="sig-img-wrap" style="height:50px;"></div>'
+            
+            sig_html += f'<div class="doc-name">{escape(doctor.get("name", ""))}</div>'
+            
+            # Designation with line breaks
+            desc = escape(doctor.get("designation", "")).replace("\n", "<br>")
+            sig_html += f'<div class="doc-desc">{desc}</div>'
+        else:
+            sig_html += '<div class="sig-img-wrap" style="height:60px;"></div>'
+            sig_html += '<div class="doc-name">................................</div>'
+            sig_html += f'<div class="doc-desc" style="color:#888;">{escape(label)}</div>'
+        sig_html += '</div>'
+    sig_html += '</div>'
+    sections.append(sig_html)
+
+    sections += [
         f'<div class="footer">Generated: {escape(generated)}</div>',
-        '</div>',
+        '</div>', # end report-shell
     ]
 
     body = "\n".join(sections)
@@ -304,7 +342,15 @@ def build_report_html(patient, pk, interp, times, concs, graph_uri=None):
     .graph-wrap {{ margin:18px auto 14px; text-align:center; border-top:1px solid #DDD; padding-top:12px; }}
     .graph-wrap img {{ width:650px; max-width:100%; height:auto; }}
     .range-note {{ margin-top:14px; font-size:15px; line-height:1.4; }}
-    .footer {{ margin-top:18px; text-align:center; color:#555; font-size:12px; }}
+    
+    .signature-container {{ margin-top:50px; display:flex; justify-content:space-between; padding:0 10px; }}
+    .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
+    .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
+    .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
+    .doc-name {{ font-weight:700; font-size:16px; margin-bottom:2px; color:#000; line-height:1.2; }}
+    .doc-desc {{ font-size:13.5px; color:#111; line-height:1.35; }}
+    
+    .footer {{ margin-top:35px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
     @media print {{
       body {{ margin:0; }}
       .page {{ width:auto; margin:0; padding:12px 12px; }}

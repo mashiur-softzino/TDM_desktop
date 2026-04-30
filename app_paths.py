@@ -37,7 +37,7 @@ def data_dir() -> Path:
 
 def ensure_data_dirs() -> Path:
     root = data_dir()
-    for child in ("logs", "generated_reports", "config", "backups"):
+    for child in ("logs", "generated_reports", "config", "backups", "signatures"):
         (root / child).mkdir(parents=True, exist_ok=True)
     return root
 

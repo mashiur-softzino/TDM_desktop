@@ -6,7 +6,7 @@ from ui_constants import (
     BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
     BORDER, RED, GREEN, ORANGE,
 )
-from ui_widgets import Card, make_shadow, small_label, value_label
+from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage
 
 import matplotlib
 matplotlib.use('QtAgg')
@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt, QTimer, pyqtSignal, QObject, QEvent, QSize, QPoint,
 )
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QDoubleValidator
 import qtawesome as qta
 from database import load_medications, add_medication, update_medication, delete_medication
 from calculations import canonical_drug_name
@@ -130,7 +130,9 @@ class SampleRow(QFrame):
                 color: {TEXT_CLR};
             }}
         """)
+        self.conc_edit.setValidator(QDoubleValidator(0.0, 1000.0, 3))
         self.conc_edit.textChanged.connect(self.changed)
+        self.time_edit.setValidator(QDoubleValidator(0.0, 100.0, 2))
         self.time_edit.textChanged.connect(self.changed)
         row.addWidget(self.conc_edit)
 
@@ -640,8 +642,9 @@ class MedicationEmptyRow(QFrame):
         self.setFixedHeight(42)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 4, 12, 4)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         icon_lbl = QLabel()
         icon_lbl.setFixedSize(16, 16)
@@ -650,9 +653,8 @@ class MedicationEmptyRow(QFrame):
         lay.addWidget(icon_lbl)
 
         lbl = QLabel(message)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("background: transparent; color: #64748B; font-size: 13px; padding: 8px 0;")
-        lay.addWidget(lbl, 1)
+        lbl.setStyleSheet("background: transparent; color: #64748B; font-size: 13px;")
+        lay.addWidget(lbl)
 
     def wheelEvent(self, event):
         parent = self.parent()
@@ -1129,6 +1131,7 @@ class MedicationSelector(QFrame):
             self._show_options(self._all_meds)
         type(self._search).mousePressEvent(self._search, event)
 
+
     # ── Filter as user types ──────────────────────
     def _on_search(self, text: str):
         self._show_options(self._filtered_options(text))
@@ -1188,12 +1191,41 @@ class MedicationSelector(QFrame):
     def eventFilter(self, _obj: QObject, event: QEvent) -> bool:
         """Close dropdown when user clicks anywhere outside this widget."""
         search = getattr(self, "_search", None)
+
+        if search is not None and _obj == search and event.type() == QEvent.Type.KeyPress:
+            if self._drop_frame.isVisible():
+                key = event.key()
+                if key == Qt.Key.Key_Down:
+                    curr = self._list.currentRow()
+                    if curr < self._list.count() - 1:
+                        self._list.setCurrentRow(curr + 1)
+                    elif curr == -1 and self._list.count() > 0:
+                        self._list.setCurrentRow(0)
+                    return True
+                elif key == Qt.Key.Key_Up:
+                    curr = self._list.currentRow()
+                    if curr > 0:
+                        self._list.setCurrentRow(curr - 1)
+                    return True
+                elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    curr = self._list.currentRow()
+                    if curr >= 0:
+                        item = self._list.item(curr)
+                        row = self._list.itemWidget(item)
+                        if isinstance(row, MedicationOptionRow):
+                            self._select_option(row.name)
+                            return True
+            if event.key() == Qt.Key.Key_Escape and self._drop_frame.isVisible():
+                self._hide_dropdown()
+                return True
+
         if search is not None and _obj == search and event.type() in {
             QEvent.Type.FocusIn,
             QEvent.Type.MouseButtonPress,
         }:
             QTimer.singleShot(0, lambda: self._show_options(self._filtered_options(search.text())))
             return False
+        
         if event.type() == QEvent.Type.Wheel and self._drop_frame.isVisible():
             obj_widget = _obj if isinstance(_obj, QWidget) else None
             if obj_widget is not None and (
@@ -1206,9 +1238,11 @@ class MedicationSelector(QFrame):
                 return True
             self._hide_dropdown()
             return False
+        
         if event.type() == QEvent.Type.ApplicationDeactivate:
             self._hide_dropdown()
             return False
+            
         if _obj == self.window() and event.type() in {
             QEvent.Type.Move,
             QEvent.Type.Resize,
@@ -1218,6 +1252,7 @@ class MedicationSelector(QFrame):
         }:
             self._hide_dropdown()
             return False
+            
         if (event.type() == QEvent.Type.MouseButtonPress
                 and self._drop_frame.isVisible()):
             click_pos = event.globalPosition().toPoint()
@@ -1225,7 +1260,8 @@ class MedicationSelector(QFrame):
             drop_local = self._drop_frame.mapFromGlobal(click_pos)
             if not self.rect().contains(local_pos) and not self._drop_frame.rect().contains(drop_local):
                 self._hide_dropdown()
-        return False
+        
+        return super().eventFilter(_obj, event)
 
     def _hide_dropdown(self):
         self._drop_frame.hide()
@@ -1242,10 +1278,11 @@ class MedicationSelector(QFrame):
         self._hide_dropdown()
         dlg = MedAddModal(self, title="Add Medication", action_label="Add Medication")
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            name = dlg.get_text()
+            name = dlg.get_text().strip()
             if name:
                 if not add_medication(name):
-                    self.window()._show_toast("Already exists", f'"{name}" is already in the medication list.', tone="warning")
+                    if hasattr(self.window(), "_show_toast"):
+                        self.window()._show_toast("Already Exists", f'"{name}" is already in the medication list.', tone="warning")
                     return
                 self._all_meds = load_medications()
                 self._add_tag(name)
@@ -1254,9 +1291,12 @@ class MedicationSelector(QFrame):
     def _edit_option(self, old_name: str):
         dlg = MedAddModal(self, title="Edit Medication", action_label="Update", initial_value=old_name)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_name = dlg.get_text()
+            new_name = dlg.get_text().strip()
             if new_name and new_name != old_name:
-                update_medication(old_name, new_name)
+                if not update_medication(old_name, new_name):
+                    if hasattr(self.window(), "_show_toast"):
+                        self.window()._show_toast("Already Exists", f'"{new_name}" is already in the medication list.', tone="warning")
+                    return
                 self._all_meds = load_medications()
                 if old_name in self._selected:
                     idx = self._selected.index(old_name)
@@ -1274,6 +1314,11 @@ class MedicationSelector(QFrame):
         if name in self._selected:
             self._remove_tag(name)
         self._show_options(self._filtered_options(self._search.text()))
+        
+        # Show toast
+        if not hasattr(self, '_toast'):
+            self._toast = ToastMessage(self.window())
+        self._toast.show_message("Deleted Successfully", f"Medication '{name}' has been removed.")
 
     # ── Tag management ────────────────────────────
     def _add_tag(self, name: str):

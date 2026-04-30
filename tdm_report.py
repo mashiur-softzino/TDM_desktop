@@ -14,6 +14,7 @@ from database import (
     init_db, save_record, delete_record, load_all, migrate_from_json,
     load_duration_options, save_duration_options, load_medications,
     add_medication, update_medication, delete_medication,
+    load_doctors, add_doctor, update_doctor, delete_doctor, get_doctor_by_id
 )
 import tempfile
 import webbrowser
@@ -48,7 +49,7 @@ from PyQt6.QtWidgets import (
     QToolButton
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage
+from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator
 import qtawesome as qta
 from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, THERAPEUTIC_RANGES, canonical_drug_name
 
@@ -202,6 +203,7 @@ class TDMMainWindow(QMainWindow):
         patient_step_lay.setContentsMargins(0, 0, 0, 0)
         patient_step_lay.setSpacing(16)
         patient_step_lay.addWidget(self._make_patient_card())
+        patient_step_lay.addWidget(self._make_signature_card())
 
         patient_actions = QHBoxLayout()
         patient_actions.addStretch()
@@ -679,10 +681,10 @@ class TDMMainWindow(QMainWindow):
         self.f_age.setMaxLength(3)
         self.f_age.setValidator(QIntValidator(0, 150, self))
         self.f_hosp_no     = field("Enter invoice number")
-        self.f_invoice_date = SmartDateEdit()
+        self.f_invoice_date = SmartDateEdit(initial_date=QDate.currentDate())
         self.f_report_no   = field("Enter report number")
         self.f_referred_by = field("Enter referred by")
-        self.f_delivery_date = SmartDateEdit()
+        self.f_delivery_date = SmartDateEdit(initial_date=QDate.currentDate())
         self.f_invoice_date.dateChanged.connect(lambda *_: self._on_data_changed())
         self.f_delivery_date.dateChanged.connect(lambda *_: self._on_data_changed())
 
@@ -903,7 +905,7 @@ class TDMMainWindow(QMainWindow):
             edit.textChanged.connect(self._on_data_changed)
         self.f_dose_dt = SmartDateTimeEdit()
         self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._on_data_changed())
-        self.f_sample_collection_date = SmartDateEdit()
+        self.f_sample_collection_date = SmartDateEdit(initial_date=QDate.currentDate())
         self.f_sample_collection_date.dateChanged.connect(lambda *_: self._on_data_changed())
         self.f_sample_collection_date.dateChanged.connect(self._update_tx_duration)
         self.f_tx_date.dateChanged.connect(self._update_tx_duration)
@@ -1080,6 +1082,7 @@ class TDMMainWindow(QMainWindow):
             }}
             QLineEdit:focus {{ border: 2px solid #EA580C; }}
         """)
+        self._direct_auc_edit.setValidator(QDoubleValidator(0.0, 1000.0, 2))
         self._direct_auc_edit.textChanged.connect(self._on_data_changed)
         direct_lay.addWidget(self._direct_auc_edit)
         self._direct_auc_box.hide()
@@ -1116,6 +1119,7 @@ class TDMMainWindow(QMainWindow):
                 border: 2px solid #EA580C;
             }}
         """)
+        self.trough_edit.setValidator(QDoubleValidator(0.0, 1000.0, 3))
         self.trough_edit.textChanged.connect(self._on_data_changed)
         trough_col.addWidget(self.trough_edit)
         trough_col.addStretch()
@@ -1288,7 +1292,7 @@ class TDMMainWindow(QMainWindow):
             return
         candidate = dlg.get_value()
         if not candidate:
-            self._show_toast("Invalid sample points", "Sample points must be between 1 and 12.", tone="warning")
+            self._show_toast("Invalid sample points", "Sample points must be between 2 and 12.", tone="warning")
             return
         if candidate in self._duration_options:
             self._show_toast("Already added", f"{candidate} sample points is already added", tone="warning")
@@ -1299,6 +1303,102 @@ class TDMMainWindow(QMainWindow):
         self._populate_table(candidate)
         self._on_data_changed()
         self._show_toast("Sample points added", f"{candidate} Sample points is added")
+
+
+    # ──────────────────────────────────────
+    # Doctor Signatures
+    # ──────────────────────────────────────
+    def _make_signature_card(self):
+        card = Card("Signature Section", "mdi6.fountain-pen-tip", icon_color="#0F766E")
+        lay = QVBoxLayout()
+        lay.setSpacing(20)
+        
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        
+        combo_style = """
+            QComboBox {
+                background: #F0FDF4;
+                border: 1.5px solid #BBF7D0;
+                border-radius: 14px;
+                padding: 10px 14px;
+                font-size: 14px;
+                color: #14532D;
+            }
+            QComboBox::drop-down { border: none; width: 30px; }
+            QComboBox::down-arrow { image: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid #166534; margin-right: 10px; }
+        """
+
+        # Prepared By
+        prep_col = QVBoxLayout()
+        prep_col.setSpacing(6)
+        prep_col.addWidget(small_label("PREPARED BY"))
+        self.prep_by_combo = QComboBox()
+        self.prep_by_combo.setStyleSheet(combo_style)
+        prep_col.addWidget(self.prep_by_combo)
+        row.addLayout(prep_col, 1)
+        
+        # Checked By
+        check_col = QVBoxLayout()
+        check_col.setSpacing(6)
+        check_col.addWidget(small_label("CHECKED BY / APPROVED BY"))
+        self.checked_by_combo = QComboBox()
+        self.checked_by_combo.setStyleSheet(combo_style)
+        check_col.addWidget(self.checked_by_combo)
+        row.addLayout(check_col, 1)
+        
+        manage_row = QHBoxLayout()
+        manage_row.addStretch()
+        
+        manage_btn = QPushButton(" Manage Doctors")
+        manage_btn.setIcon(qta.icon("mdi6.account-cog-outline", color="#166534"))
+        manage_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        manage_btn.setStyleSheet("""
+            QPushButton {
+                background: #DCFCE7;
+                color: #166534;
+                border: 1.5px solid #86EFAC;
+                border-radius: 12px;
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #BBF7D0; }
+        """)
+        manage_btn.clicked.connect(self._manage_doctors)
+        manage_row.addWidget(manage_btn)
+        
+        lay.addLayout(row)
+        lay.addLayout(manage_row)
+        
+        card.body().addLayout(lay)
+        # Populate initially
+        QTimer.singleShot(100, self._refresh_doctor_combos)
+        return card
+
+    def _refresh_doctor_combos(self, select_prep_id=None, select_check_id=None):
+        doctors = load_doctors()
+        self.prep_by_combo.clear()
+        self.checked_by_combo.clear()
+        
+        self.prep_by_combo.addItem("Select Doctor...", 0)
+        self.checked_by_combo.addItem("Select Doctor...", 0)
+        
+        for d in doctors:
+            self.prep_by_combo.addItem(d['name'], d['id'])
+            self.checked_by_combo.addItem(d['name'], d['id'])
+            
+        if select_prep_id:
+            idx = self.prep_by_combo.findData(select_prep_id)
+            if idx >= 0: self.prep_by_combo.setCurrentIndex(idx)
+        if select_check_id:
+            idx = self.checked_by_combo.findData(select_check_id)
+            if idx >= 0: self.checked_by_combo.setCurrentIndex(idx)
+
+    def _manage_doctors(self):
+        dlg = DoctorManagementModal(self)
+        dlg.exec()
+        self._refresh_doctor_combos()
 
     def _remove_duration_option(self, duration):
         if len(self._duration_options) <= 1:
@@ -1339,6 +1439,9 @@ class TDMMainWindow(QMainWindow):
     def _update_tx_duration(self):
         tx_date = self.f_tx_date.date()
         sample_date = self.f_sample_collection_date.date()
+        if not tx_date or not sample_date:
+            self.f_tx_duration.setText("—")
+            return
         
         days = tx_date.daysTo(sample_date)
         
@@ -1398,22 +1501,27 @@ class TDMMainWindow(QMainWindow):
             self._drafts = []
 
     def _patient_payload(self):
+        d_inv = self.f_invoice_date.date()
+        d_del = self.f_delivery_date.date()
+        d_sam = self.f_sample_collection_date.date()
+        d_tx  = self.f_tx_date.date()
+        
         return {
             'name': self.f_name.text().strip() or 'N/A',
             'age': self.f_age.text().strip() or 'N/A',
             'sex': '' if self.f_sex.currentText() == "Choose a gender" else self.f_sex.currentText(),
-            'weight': self.f_invoice_date.date().toString("dd.MM.yyyy"),
+            'weight': d_inv.toString("dd.MM.yyyy") if d_inv else 'N/A',
             'hosp_id': self.f_hosp_no.text().strip() or 'N/A',
             'ward': self.f_report_no.text().strip() or 'N/A',
             'dept': self.f_referred_by.text().strip() or 'N/A',
-            'delivery_date': self.f_delivery_date.date().toString("dd.MM.yyyy"),
+            'delivery_date': d_del.toString("dd.MM.yyyy") if d_del else 'N/A',
             'drug': self.f_drug.currentText().strip(),
             'preparation': self.f_preparation.text().strip(),
             'dose': self.f_dose.text().strip(),
             'dose_dt': self.f_dose_dt.dateTime().toString("dd.MM.yyyy 'at' hh:mmAP"),
-            'sample_collection_date': self.f_sample_collection_date.date().toString("dd.MM.yyyy"),
+            'sample_collection_date': d_sam.toString("dd.MM.yyyy") if d_sam else 'N/A',
             'diag': self.f_diag.text().strip() or 'N/A',
-            'tx_date': self.f_tx_date.date().toString("dd.MM.yyyy"),
+            'tx_date': d_tx.toString("dd.MM.yyyy") if d_tx else 'N/A',
             'med': self.f_med.get_text() or 'N/A',
         }
 
@@ -1447,6 +1555,8 @@ class TDMMainWindow(QMainWindow):
             'sample_rows': self.sample_table.get_rows_payload(),
             'times': times,
             'concs': concs,
+            'prepared_by_id': self.prep_by_combo.currentData(),
+            'checked_by_id': self.checked_by_combo.currentData(),
         }
         if hasattr(self, '_last_pk'):
             data['pk'] = self._last_pk
@@ -1702,7 +1812,7 @@ class TDMMainWindow(QMainWindow):
         self.f_preparation.setText(patient.get('preparation', 'Mycophenolate Mofetil (MMF)'))
         self.f_dose.setText(patient.get('dose', '540mg - 720mg') if patient.get('dose') != 'N/A' else '')
         tx_date = QDate.fromString(patient.get('tx_date', ''), "dd.MM.yyyy")
-        self.f_tx_date.setDate(tx_date if tx_date.isValid() else QDate.currentDate())
+        self.f_tx_date.setDate(tx_date if tx_date.isValid() else None)
         self._update_tx_duration()
         dose_dt_text = patient.get('dose_dt', '')
         dose_dt = QDateTime.fromString(dose_dt_text, "dd.MM.yyyy 'at' hh:mmAP")
@@ -1720,8 +1830,13 @@ class TDMMainWindow(QMainWindow):
         self.f_med.clear_selection()
         meds = patient.get('med', '')
         if meds and meds != 'N/A':
-            for med in [m.strip() for m in meds.split(',') if m.strip()]:
-                self.f_med._add_tag(med)
+            for m in [m.strip() for m in meds.split(',') if m.strip()]:
+                self.f_med.select_med(m)
+        
+        # Restore doctors
+        prep_id = snapshot.get('prepared_by_id')
+        check_id = snapshot.get('checked_by_id')
+        self._refresh_doctor_combos(select_prep_id=prep_id, select_check_id=check_id)
 
         scheme = snapshot.get('scheme', 4)
         rows_payload = snapshot.get('sample_rows')
@@ -1810,12 +1925,19 @@ class TDMMainWindow(QMainWindow):
             from app_paths import reports_dir as get_reports_dir
             reports_dir = get_reports_dir()
             report_path = reports_dir / f"{snapshot['id']}.html"
+            prep_id = snapshot.get('prepared_by_id')
+            check_id = snapshot.get('checked_by_id')
+            prepared_by = get_doctor_by_id(prep_id) if prep_id else None
+            checked_by = get_doctor_by_id(check_id) if check_id else None
+
             html = build_report_html(
                 patient=snapshot.get('patient', {}),
                 pk=snapshot.get('pk', {}),
                 interp=snapshot.get('interp', 'N/A'),
                 times=snapshot.get('times', []),
                 concs=snapshot.get('concs', []),
+                prepared_by=prepared_by,
+                checked_by=checked_by,
                 graph_uri=graph_uri,
             )
             report_path.write_text(html, encoding="utf-8")
@@ -1837,13 +1959,38 @@ class TDMMainWindow(QMainWindow):
             return
         report_path = snapshot.get('report_path')
         if not report_path or not Path(report_path).exists():
-            QMessageBox.information(
-                self,
-                "Saved Report Not Found",
-                "This sample does not have a previously saved print file yet. Please generate the report again once to save the exact print version.",
+            # Re-generate it if missing
+            from report_print import build_report_html
+            prep_id = snapshot.get('prepared_by_id')
+            check_id = snapshot.get('checked_by_id')
+            prepared_by = get_doctor_by_id(prep_id) if prep_id else None
+            checked_by = get_doctor_by_id(check_id) if check_id else None
+            
+            html = build_report_html(
+                patient=snapshot.get('patient', {}),
+                pk=snapshot.get('pk', {}),
+                interp=snapshot.get('interp', 'N/A'),
+                times=snapshot.get('times', []),
+                concs=snapshot.get('concs', []),
+                prepared_by=prepared_by,
+                checked_by=checked_by,
+                graph_uri=self._graph_uri_for_snapshot(snapshot) if snapshot.get('times') else None
             )
-            return
-        webbrowser.open(Path(report_path).as_uri())
+            # Re-determine path if it was empty
+            if not report_path:
+                from app_paths import reports_dir
+                report_path = str(reports_dir() / f"{snapshot['id']}.html")
+                snapshot['report_path'] = report_path
+
+            try:
+                Path(report_path).write_text(html, encoding="utf-8")
+            except Exception:
+                pass
+        
+        if report_path and Path(report_path).exists():
+            webbrowser.open(f"file://{Path(report_path).absolute()}")
+        else:
+            self._show_toast("Error", "Report file not found and could not be regenerated.", tone="error")
 
     def _apply_results(self, pk, interp):
         if self._results_dialog is None:
@@ -2054,7 +2201,7 @@ class TDMMainWindow(QMainWindow):
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
-        self.f_tx_date.setDate(QDate.currentDate())
+        self.f_tx_date.setDate(None)
         self.f_invoice_date.setDate(QDate.currentDate())
         self.f_delivery_date.setDate(QDate.currentDate())
         self.f_dose_dt.setDateTime(QDateTime.currentDateTime())
@@ -2075,3 +2222,205 @@ class TDMMainWindow(QMainWindow):
         self._switch_page(0)
         if hasattr(self, '_main_scroll'):
             self._main_scroll.verticalScrollBar().setValue(0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper Modals for Doctors
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DoctorManagementModal(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manage Doctors")
+        self.setMinimumSize(500, 500)
+        self.setStyleSheet(f"background: white; border-radius: 12px;")
+        
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 20, 20, 20)
+        lay.setSpacing(16)
+        
+        header = QLabel("Manage Signatories")
+        header.setStyleSheet(f"color: {TEXT_CLR}; font-size: 18px; font-weight: bold;")
+        lay.addWidget(header)
+        
+        self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background: #F8FAFC;
+                border: 1.5px solid #E2E8F0;
+                border-radius: 12px;
+                padding: 8px;
+            }}
+            QListWidget::item {{
+                background: white;
+                border: 1px solid #F1F5F9;
+                border-radius: 8px;
+                margin-bottom: 6px;
+                padding: 10px;
+            }}
+            QListWidget::item:selected {{ background: #EFF6FF; border-color: #BFDBFE; color: {TEXT_CLR}; }}
+        """)
+        lay.addWidget(self.list_widget)
+        
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("Add New Doctor")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background: #16A34A; color: white; border: none; border-radius: 8px;
+                padding: 8px 16px; font-weight: bold;
+            }
+            QPushButton:hover { background: #15803D; }
+        """)
+        add_btn.clicked.connect(self._add_doctor)
+        
+        edit_btn = QPushButton("Edit Selected")
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background: #F1F5F9; color: #475569; border: 1px solid #E2E8F0;
+                border-radius: 8px; padding: 8px 16px; font-weight: bold;
+            }
+            QPushButton:hover { background: #E2E8F0; }
+        """)
+        edit_btn.clicked.connect(self._edit_doctor)
+        
+        del_btn = QPushButton("Delete")
+        del_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEF2F2; color: #DC2626; border: 1px solid #FEE2E2;
+                border-radius: 8px; padding: 8px 16px; font-weight: bold;
+            }
+            QPushButton:hover { background: #FEE2E2; }
+        """)
+        del_btn.clicked.connect(self._delete_doctor)
+        
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(edit_btn)
+        btn_row.addWidget(del_btn)
+        lay.addLayout(btn_row)
+        
+        self._refresh_list()
+        
+    def _refresh_list(self):
+        self.list_widget.clear()
+        doctors = load_doctors()
+        for d in doctors:
+            item = QListWidgetItem(f"{d['name']} ({d['designation'] or 'No designation'})")
+            item.setData(Qt.ItemDataRole.UserRole, d)
+            self.list_widget.addItem(item)
+            
+    def _add_doctor(self):
+        dlg = DoctorEditModal(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._refresh_list()
+            
+    def _edit_doctor(self):
+        item = self.list_widget.currentItem()
+        if not item: return
+        doctor = item.data(Qt.ItemDataRole.UserRole)
+        dlg = DoctorEditModal(doctor, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._refresh_list()
+            
+    def _delete_doctor(self):
+        item = self.list_widget.currentItem()
+        if not item: return
+        doctor = item.data(Qt.ItemDataRole.UserRole)
+        if QMessageBox.question(self, "Delete Doctor", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
+            delete_doctor(doctor['id'])
+            self._refresh_list()
+
+class DoctorEditModal(QDialog):
+    def __init__(self, doctor=None, parent=None):
+        super().__init__(parent)
+        self.doctor = doctor
+        self.setWindowTitle("Add Doctor" if not doctor else "Edit Doctor")
+        self.setMinimumSize(400, 450)
+        self.setStyleSheet("background: white;")
+        
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 24, 24, 24)
+        lay.setSpacing(16)
+        
+        lay.addWidget(small_label("DOCTOR NAME"))
+        self.name_edit = QLineEdit(doctor['name'] if doctor else "")
+        self.name_edit.setStyleSheet(self._input_style())
+        lay.addWidget(self.name_edit)
+        
+        lay.addWidget(small_label("DESIGNATION / DEGREE (DESCRIPTION)"))
+        self.desc_edit = QLineEdit(doctor['designation'] if doctor else "")
+        self.desc_edit.setPlaceholderText("e.g. MBBS, MD (Nephrology)")
+        self.desc_edit.setStyleSheet(self._input_style())
+        lay.addWidget(self.desc_edit)
+        
+        lay.addWidget(small_label("DIGITAL SIGNATURE"))
+        self.sig_label = QLabel()
+        self.sig_label.setFixedSize(200, 80)
+        self.sig_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sig_label.setStyleSheet("border: 1.5px dashed #CBD5E1; border-radius: 8px; background: #F8FAFC;")
+        self.sig_path = doctor['signature_path'] if doctor else None
+        self._update_sig_preview()
+        lay.addWidget(self.sig_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        
+        upload_btn = QPushButton("Upload Signature Image")
+        upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        upload_btn.setStyleSheet("""
+            QPushButton {
+                background: #EFF6FF; color: #2563EB; border: 1.5px solid #BFDBFE;
+                border-radius: 8px; padding: 8px; font-weight: bold;
+            }
+            QPushButton:hover { background: #DBEAFE; }
+        """)
+        upload_btn.clicked.connect(self._upload_sig)
+        lay.addWidget(upload_btn)
+        
+        lay.addStretch()
+        
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        btns.accepted.connect(self._save)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+        
+    def _input_style(self):
+        return """
+            QLineEdit {
+                background: #F1F5F9; border: 1.5px solid #E2E8F0; border-radius: 10px;
+                padding: 10px 14px; font-size: 14px;
+            }
+            QLineEdit:focus { border-color: #3B82F6; background: white; }
+        """
+        
+    def _upload_sig(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Signature Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+        if file_path:
+            # Copy to app signatures dir
+            from app_paths import ensure_data_dirs
+            import shutil
+            sig_dir = ensure_data_dirs() / "signatures"
+            ext = Path(file_path).suffix
+            dest_name = f"sig_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+            dest_path = sig_dir / dest_name
+            try:
+                shutil.copy2(file_path, dest_path)
+                self.sig_path = str(dest_path)
+                self._update_sig_preview()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to copy signature: {e}")
+                
+    def _update_sig_preview(self):
+        if self.sig_path and Path(self.sig_path).exists():
+            pix = QPixmap(self.sig_path)
+            self.sig_label.setPixmap(pix.scaled(self.sig_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        else:
+            self.sig_label.setText("No Signature Uploaded")
+            
+    def _save(self):
+        name = self.name_edit.text().strip()
+        desc = self.desc_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Required", "Doctor name is required.")
+            return
+        if self.doctor:
+            update_doctor(self.doctor['id'], name, desc, self.sig_path)
+        else:
+            add_doctor(name, desc, self.sig_path)
+        self.accept()

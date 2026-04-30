@@ -225,12 +225,12 @@ class DurationEditModal(QDialog):
 
     def accept(self):
         text = self.edit.text().strip()
-        if not text.isdigit() or not (1 <= int(text) <= 12):
+        if not text.isdigit() or not (2 <= int(text) <= 12):
             self.edit.setFocus()
             parent = self.parent()
             window = parent.window() if parent is not None else self.window()
             if hasattr(window, "_show_toast"):
-                window._show_toast("Invalid sample points", "Sample points must be between 1 and 12.", tone="warning")
+                window._show_toast("Invalid sample points", "Sample points must be between 2 and 12.", tone="warning")
             return
         super().accept()
 
@@ -600,9 +600,10 @@ class MonthOnlyCalendar(QCalendarWidget):
 class SmartDateEdit(QWidget):
     dateChanged = pyqtSignal(QDate)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, initial_date=None, placeholder="Please select date"):
         super().__init__(parent)
-        self._date = QDate.currentDate()
+        self._date = initial_date
+        self._placeholder = placeholder
         self.setStyleSheet("background: transparent;")
 
         outer = QHBoxLayout(self)
@@ -628,7 +629,11 @@ class SmartDateEdit(QWidget):
         self._text = QLineEdit()
         self._text.setReadOnly(True)
         self._text.setFrame(False)
-        self._text.setText(self._date.toString("dd  MMM  yyyy"))
+        self._text.setPlaceholderText(self._placeholder)
+        if self._date:
+            self._text.setText(self._date.toString("dd  MMM  yyyy"))
+        else:
+            self._text.setText("")
         self._text.setStyleSheet(
             f"background: transparent; color: {TEXT_CLR}; border: none; "
             "font-size: 13px; font-weight: 600; padding: 12px 0;"
@@ -748,7 +753,7 @@ class SmartDateEdit(QWidget):
         self._calendar.setMinimumSize(300, 244)
         self._calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self._calendar.setGridVisible(False)
-        self._calendar.setSelectedDate(self._date)
+        self._calendar.setSelectedDate(self._date if self._date else QDate.currentDate())
         self._calendar.setDateEditEnabled(False)
         self._calendar.setNavigationBarVisible(True)
         self._calendar.clicked.connect(self._on_date_selected)
@@ -815,7 +820,7 @@ class SmartDateEdit(QWidget):
     def _show_popup(self):
         if self._popup is None:
             self._build_popup()
-        self._calendar.setSelectedDate(self._date)
+        self._calendar.setSelectedDate(self._date if self._date else QDate.currentDate())
         self._popup.adjustSize()
         screen = self.screen() or __import__('PyQt6.QtWidgets', fromlist=['QApplication']).QApplication.primaryScreen()
         pos = self.mapToGlobal(self.rect().bottomLeft())
@@ -840,8 +845,12 @@ class SmartDateEdit(QWidget):
 
     def setDate(self, date):
         self._date = date
-        self._text.setText(self._date.toString("dd  MMM  yyyy"))
-        self.dateChanged.emit(self._date)
+        if self._date and self._date.isValid():
+            self._text.setText(self._date.toString("dd  MMM  yyyy"))
+            self.dateChanged.emit(self._date)
+        else:
+            self._date = None
+            self._text.setText("")
 
 
 class SmartDateTimeEdit(QWidget):
@@ -978,7 +987,7 @@ class SmartDateTimeEdit(QWidget):
         card_lay.addWidget(self._calendar)
 
         time_row = QFrame()
-        time_row.setStyleSheet("background: #F7FAFE; border-radius: 14px;")
+        time_row.setStyleSheet("background: #F7FAFE; border: none; border-radius: 14px;")
         time_lay = QHBoxLayout(time_row)
         time_lay.setContentsMargins(12, 10, 12, 10)
         time_lay.setSpacing(10)
