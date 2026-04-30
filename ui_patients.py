@@ -439,9 +439,9 @@ class PatientRow(QFrame):
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             row.addWidget(lbl, stretch)
 
-        text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=3)
+        text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=4)
         if row_type == 'sample':
-            text_cell(snapshot.get('patient', {}).get('pid', 'N/A'), stretch=3)
+            text_cell(snapshot.get('patient', {}).get('pid', 'N/A'), stretch=4)
 
         drug = QLabel(snapshot.get('patient', {}).get('drug', 'N/A'))
         drug.setObjectName("drugBadge")
@@ -449,8 +449,7 @@ class PatientRow(QFrame):
         drug.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(drug, 2)
 
-        text_cell(snapshot.get('patient', {}).get('dose', 'N/A'), stretch=3)
-        text_cell(snapshot.get('saved_at', 'N/A'), stretch=2, object_name="dateText")
+        text_cell(snapshot.get('saved_at', 'N/A'), stretch=3, object_name="dateText")
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -596,14 +595,13 @@ class PatientsListCard(Card):
         hdr_lay.setContentsMargins(20, 14, 20, 14)
         hdr_lay.setSpacing(10)
         header_columns = [
-            ("NAME", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("NAME", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("DRUG", 2, Qt.AlignmentFlag.AlignCenter),
-            ("DOSE", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            ("DATE", 2, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("COLLECTION DATE", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("ACTIONS", 0, Qt.AlignmentFlag.AlignCenter),
         ]
         if self._row_type == 'sample':
-            header_columns.insert(1, ("PATIENT ID", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
+            header_columns.insert(1, ("PATIENT ID", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter))
         for text, stretch, alignment in header_columns:
             lbl = QLabel(text)
             lbl.setAlignment(alignment)

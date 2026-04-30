@@ -1293,7 +1293,7 @@ class TDMMainWindow(QMainWindow):
         if candidate in self._duration_options:
             self._show_toast("Already added", f"{candidate} sample points is already added", tone="warning")
             return
-        self._duration_options.append(candidate)
+        self._duration_options.insert(0, candidate)
         self._scheme_rows_cache[candidate] = self._rows_payload_for_duration(candidate)
         self._set_duration_options(self._duration_options, selected=candidate)
         self._populate_table(candidate)

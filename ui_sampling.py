@@ -102,6 +102,7 @@ class SampleRow(QFrame):
         row.addWidget(self.time_edit)
 
         unit = QLabel("h")
+        unit.setFixedWidth(20)
         unit.setStyleSheet(f"color: {LABEL_CLR}; font-size: 12px; background: transparent;")
         row.addWidget(unit)
 
@@ -161,14 +162,14 @@ class ModernSampleTable(QFrame):
         self.setObjectName("sampleTable")
         self.setStyleSheet(f"""
             QFrame#sampleTable {{
-                background: #FFFBF5;
-                border: 1px solid #FDBA74;
-                border-radius: 18px;
+                background: white;
+                border: 2.5px solid #F97316;
+                border-radius: 20px;
             }}
         """)
 
         self._outer = QVBoxLayout(self)
-        self._outer.setContentsMargins(0, 0, 0, 0)
+        self._outer.setContentsMargins(3, 3, 3, 3)
         self._outer.setSpacing(0)
 
         # Header
@@ -177,29 +178,37 @@ class ModernSampleTable(QFrame):
         hdr.setStyleSheet(f"""
             QFrame#sampleHdr {{
                 background: #FFF7ED;
-                border-top-left-radius: 18px;
-                border-top-right-radius: 18px;
-                border-bottom: 1px solid #FDBA74;
+                border: none;
+                border-top-left-radius: 15px;
+                border-top-right-radius: 15px;
+                border-bottom: 2.5px solid #FDBA74;
             }}
         """)
         hdr_row = QHBoxLayout(hdr)
         hdr_row.setContentsMargins(18, 10, 18, 10)
+        hdr_row.setSpacing(14)
 
         lbl_time = QLabel("TIME (H)")
+        lbl_time.setFixedWidth(80)
+        lbl_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_time.setStyleSheet(
             f"color: {LABEL_CLR}; font-size: 11px; font-weight: bold;"
             "letter-spacing: 1px; background: transparent;"
         )
+        
         lbl_conc = QLabel("CONC. (μg/mL)")
+        lbl_conc.setFixedWidth(200)
+        lbl_conc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_conc.setStyleSheet(
             f"color: {LABEL_CLR}; font-size: 11px; font-weight: bold;"
             "letter-spacing: 1px; background: transparent;"
         )
-        hdr_row.addSpacing(32)
+        
+        hdr_row.addSpacing(18) # dot space
         hdr_row.addWidget(lbl_time)
+        hdr_row.addSpacing(20) # unit space
         hdr_row.addStretch()
         hdr_row.addWidget(lbl_conc)
-        hdr_row.addSpacing(4)
         self._outer.addWidget(hdr)
 
         # Rows container
