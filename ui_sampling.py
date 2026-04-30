@@ -3,8 +3,7 @@ Sampling-related UI classes: sample table rows, gradient chart, medication selec
 """
 
 from ui_constants import (
-    BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
-    BORDER, RED, GREEN, ORANGE,
+    BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
 )
 from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage
 
@@ -17,10 +16,10 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
     QDialog, QSizePolicy, QListWidget, QListWidgetItem,
-    QApplication,
+    QApplication, QLayout,
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, pyqtSignal, QObject, QEvent, QSize, QPoint,
+    Qt, QTimer, pyqtSignal, QObject, QEvent, QSize, QPoint, QRect,
 )
 from PyQt6.QtGui import QColor, QDoubleValidator
 import qtawesome as qta
@@ -444,6 +443,77 @@ class MedTag(QFrame):
         """)
         btn.clicked.connect(lambda: self.removed.emit(self.name))
         row.addWidget(btn)
+
+
+class FlowLayout(QLayout):
+    """Small wrapping layout for medication tags inside a scroll area."""
+
+    def __init__(self, parent=None, margin=0, spacing=6):
+        super().__init__(parent)
+        self._items = []
+        self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only=False):
+        margins = self.contentsMargins()
+        effective = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        spacing = self.spacing()
+
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + spacing
+            if next_x - spacing > effective.right() and line_height > 0:
+                x = effective.x()
+                y += line_height + spacing
+                next_x = x + hint.width() + spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            line_height = max(line_height, hint.height())
+
+        return y + line_height - rect.y() + margins.bottom()
 
 
 class MedAddModal(QDialog):
@@ -1085,45 +1155,46 @@ class MedicationSelector(QFrame):
         # ── Tags scroll ───────────────────────────
         self._tags_widget = QWidget()
         self._tags_widget.setStyleSheet("background: transparent;")
-        self._tags_layout = QHBoxLayout(self._tags_widget)
-        self._tags_layout.setContentsMargins(0, 0, 0, 0)
-        self._tags_layout.setSpacing(6)
-        self._tags_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._tags_layout = FlowLayout(self._tags_widget, margin=0, spacing=6)
 
         self._tags_scroll = QScrollArea()
-        self._tags_scroll.setWidgetResizable(False)
+        self._tags_scroll.setWidgetResizable(True)
         self._tags_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._tags_scroll.setFixedHeight(60)
+        self._tags_scroll.setFixedHeight(116)
         self._tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._tags_scroll.setWidget(self._tags_widget)
         self._tags_scroll.setStyleSheet("""
             QScrollArea {
                 background: transparent;
                 border: none;
             }
-            QScrollBar:horizontal {
+            QScrollBar:vertical {
                 background: transparent;
-                height: 8px;
-                margin: 8px 24px 2px 24px;
+                width: 8px;
+                margin: 6px 2px 6px 4px;
             }
-            QScrollBar::handle:horizontal {
+            QScrollBar::handle:vertical {
                 background: #C9D8EA;
                 border-radius: 4px;
-                min-width: 36px;
+                min-height: 28px;
             }
-            QScrollBar::handle:horizontal:hover {
+            QScrollBar::handle:vertical:hover {
                 background: #B6CAE2;
             }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
             }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
                 background: transparent;
             }
         """)
         outer.addWidget(self._tags_scroll)
         self._update_tags_visibility()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._update_tags_visibility)
 
     # ── Show all options when search field is clicked empty ──
     def _search_clicked(self, event):
@@ -1364,31 +1435,19 @@ class MedicationSelector(QFrame):
 
     def _update_tags_visibility(self):
         has_tags = bool(self._selected)
-        self._tags_scroll.setVisible(has_tags)
+        # Keep _tags_scroll always visible so MedicationSelector height never changes
+        # (hiding it causes the parent layout to reflow and shift other widgets)
         if not has_tags:
-            self._tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._tags_widget.setMinimumSize(0, 0)
             return
         self._tags_layout.activate()
-        spacing = self._tags_layout.spacing()
-        margins = self._tags_layout.contentsMargins()
-        content_width = margins.left() + margins.right()
-        visible_count = 0
-        for i in range(self._tags_layout.count()):
-            item = self._tags_layout.itemAt(i)
-            widget = item.widget()
-            if widget is not None:
-                content_width += widget.sizeHint().width()
-                visible_count += 1
-        if visible_count > 1:
-            content_width += spacing * (visible_count - 1)
-        viewport_width = self._tags_scroll.viewport().width()
-        width = max(viewport_width, content_width + 12)
-        self._tags_widget.setMinimumWidth(width)
-        self._tags_widget.setFixedSize(width, max(36, self._tags_scroll.viewport().height()))
-        self._tags_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
-            if content_width > viewport_width
+        viewport_width = max(240, self._tags_scroll.viewport().width())
+        content_height = max(36, self._tags_layout.heightForWidth(viewport_width))
+        self._tags_widget.setMinimumSize(viewport_width, content_height)
+        self._tags_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            if content_height > self._tags_scroll.viewport().height()
             else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self._tags_scroll.horizontalScrollBar().setValue(self._tags_scroll.horizontalScrollBar().maximum())
         self._hide_dropdown()

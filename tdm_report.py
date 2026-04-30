@@ -5,7 +5,6 @@ ui_sampling, and ui_patients.
 """
 
 import sys
-import json  # kept for report_print compatibility
 from app_logger import (
     log_report_generated, log_draft_saved,
     log_record_loaded, log_record_deleted, log_report_printed, log_error,
@@ -23,35 +22,27 @@ from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 
-from ui_constants import (BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
-                           BORDER, RED, GREEN, ORANGE, DEFAULT_DURATION_OPTIONS,
+from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR,
+                           DEFAULT_DURATION_OPTIONS,
                            BASE_SAMPLE_TIMES, PATIENTS_FILE, STYLE,
-                           sampling_times_for_duration, make_shadow, small_label, value_label)
-from ui_widgets import (Card, ToggleButton, DurationEditModal, DurationChip,
+                           sampling_times_for_duration, make_shadow, small_label)
+from ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
-                        MonthOnlyCalendar, IconCircle, StatBox, ToastMessage,
-                        ConfirmActionModal)
-from ui_sampling import (ROW_COLORS, DEFAULT_MEDICATIONS, SampleRow, ModernSampleTable,
-                         GradientCanvas, MedTag, MedAddModal, MedicationOptionRow,
-                         MedicationEmptyRow, MedicationListWidget, MedicationSelector,
-                         DrugSelector)
-from ui_patients import ResultsDialog, PatientReportDialog, PatientRow, PatientsListCard
+                        ToastMessage, ConfirmActionModal)
+from ui_sampling import ModernSampleTable, MedicationSelector, DrugSelector
+from ui_patients import ResultsDialog, PatientRow, PatientsListCard
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
-    QMessageBox, QComboBox, QDialog, QDialogButtonBox, QDateEdit,
-    QDateTimeEdit,
-    QTimeEdit,
-    QSizePolicy, QGridLayout, QGraphicsDropShadowEffect,
-    QButtonGroup, QAbstractButton, QFileDialog, QSpacerItem,
-    QListWidget, QListWidgetItem, QStackedWidget, QCalendarWidget,
-    QToolButton
+    QMessageBox, QDialog, QComboBox,
+    QSizePolicy, QGridLayout,
+    QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator
 import qtawesome as qta
-from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, THERAPEUTIC_RANGES, canonical_drug_name
+from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, canonical_drug_name
 
 class TDMMainWindow(QMainWindow):
     def __init__(self):
@@ -363,10 +354,10 @@ class TDMMainWindow(QMainWindow):
         return wrap
 
     def _switch_page(self, index):
-        if index == 1 and hasattr(self, 'draft_list_card'):
-            self.draft_list_card.clear_search()
-        elif index == 2 and hasattr(self, 'sample_list_card'):
+        if index == 1 and hasattr(self, 'sample_list_card'):
             self.sample_list_card.clear_search()
+        elif index == 2 and hasattr(self, 'draft_list_card'):
+            self.draft_list_card.clear_search()
         for i in range(self.page_stack.count()):
             w = self.page_stack.widget(i)
             if i == index:
@@ -805,53 +796,55 @@ class TDMMainWindow(QMainWindow):
         clinical_head.addStretch()
         clinical_lay.addLayout(clinical_head)
 
-        clinical_grid = QGridLayout()
-        clinical_grid.setSpacing(16)
-        clinical_grid.setHorizontalSpacing(20)
-        clinical_grid.setColumnStretch(0, 0)
-        clinical_grid.setColumnStretch(1, 0)
-        clinical_grid.setColumnStretch(2, 1)
+        # ── Two-column layout ──────────────────────────────────
+        # Left col : DATE OF TRANSPLANT (top) + DIAGNOSIS (below) — never moves
+        # Right col: MEDICATIONS — height is stable because _tags_scroll is always visible
+        two_col = QHBoxLayout()
+        two_col.setSpacing(20)
+        two_col.setContentsMargins(0, 0, 0, 0)
 
-        date_col = QVBoxLayout()
-        date_col.setSpacing(8)
-        date_col.addWidget(small_label("Date of Transplant", color="#7E8DA3", size=10, bold=True))
+        # Left column — Date of Transplant + Diagnosis, independent of medications
+        left_col = QVBoxLayout()
+        left_col.setSpacing(16)
+        left_col.setContentsMargins(0, 0, 0, 0)
+
+        date_section = QVBoxLayout()
+        date_section.setSpacing(8)
+        date_section.addWidget(small_label("Date of Transplant", color="#7E8DA3", size=10, bold=True))
         self.f_tx_date.setMinimumWidth(400)
         self.f_tx_date.setMaximumWidth(400)
-        date_col.addWidget(self.f_tx_date, 0, Qt.AlignmentFlag.AlignTop)
-        date_col.addStretch()
-        clinical_grid.addLayout(date_col, 0, 0, Qt.AlignmentFlag.AlignTop)
+        date_section.addWidget(self.f_tx_date)
+        left_col.addLayout(date_section)
 
+        diag_section = QVBoxLayout()
+        diag_section.setSpacing(6)
+        diag_section.addWidget(small_label("Diagnosis", color="#7E8DA3", size=10, bold=True))
+        self.f_diag.setMinimumWidth(400)
+        self.f_diag.setMaximumWidth(400)
+        self.f_diag.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        diag_section.addWidget(self.f_diag)
+        left_col.addLayout(diag_section)
+        left_col.addStretch()
+
+        two_col.addLayout(left_col)
+
+        # Right column — Medications (height stable: _tags_scroll always visible)
         med_col = QVBoxLayout()
         med_col.setSpacing(8)
+        med_col.setContentsMargins(0, 0, 0, 0)
         med_col.addWidget(small_label("Medications", color="#7E8DA3", size=10, bold=True))
         self.f_med.setMinimumWidth(400)
         self.f_med.setMaximumWidth(400)
         med_col.addWidget(self.f_med, 0, Qt.AlignmentFlag.AlignTop)
         med_col.addStretch()
-        clinical_grid.addLayout(med_col, 0, 1, Qt.AlignmentFlag.AlignTop)
 
-        clinical_lay.addLayout(clinical_grid)
+        two_col.addLayout(med_col)
+        two_col.addStretch(1)
 
-        diagnosis_col = QVBoxLayout()
-        diagnosis_col.setContentsMargins(0, -4, 0, 0)
-        diagnosis_col.setSpacing(6)
-        diagnosis_col.addWidget(small_label("Diagnosis", color="#7E8DA3", size=10, bold=True))
-        self.f_diag.setMinimumWidth(400)
-        self.f_diag.setMaximumWidth(400)
-        self.f_diag.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        diag_wrap = QWidget()
-        diag_wrap.setMinimumWidth(400)
-        diag_wrap.setMaximumWidth(400)
-        diag_wrap.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        diag_row = QHBoxLayout(diag_wrap)
-        diag_row.setContentsMargins(0, 0, 0, 0)
-        diag_row.setSpacing(0)
-        diag_row.addWidget(self.f_diag)
-        diagnosis_col.addWidget(diag_wrap, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        diagnosis_col.addStretch()
-        clinical_grid.addLayout(diagnosis_col, 1, 0, Qt.AlignmentFlag.AlignTop)
+        clinical_lay.addLayout(two_col)
 
         card.body().addWidget(clinical_box)
+
 
         return card
 
@@ -1510,9 +1503,9 @@ class TDMMainWindow(QMainWindow):
             'name': self.f_name.text().strip() or 'N/A',
             'age': self.f_age.text().strip() or 'N/A',
             'sex': '' if self.f_sex.currentText() == "Choose a gender" else self.f_sex.currentText(),
-            'weight': d_inv.toString("dd.MM.yyyy") if d_inv else 'N/A',
-            'hosp_id': self.f_hosp_no.text().strip() or 'N/A',
-            'ward': self.f_report_no.text().strip() or 'N/A',
+            'invoice_date': self.f_invoice_date.date().toString("dd.MM.yyyy"),
+            'invoice_number': self.f_hosp_no.text().strip() or 'N/A',
+            'report_number': self.f_report_no.text().strip() or 'N/A',
             'dept': self.f_referred_by.text().strip() or 'N/A',
             'delivery_date': d_del.toString("dd.MM.yyyy") if d_del else 'N/A',
             'drug': self.f_drug.currentText().strip(),
@@ -1622,9 +1615,32 @@ class TDMMainWindow(QMainWindow):
 
     _LIST_PAGE_SIZE = 10
 
+    def _reset_list_view(self, card):
+        if card is None:
+            return
+        card.set_page_index(0)
+        card.clear_search()
+
     def _refresh_patients_list(self):
         if not hasattr(self, 'sample_list_card'):
             return
+
+        def sort_key(snapshot):
+            snapshot_id = str(snapshot.get('id', '') or '')
+            saved_at = str(snapshot.get('saved_at', '') or '')
+            patient = snapshot.get('patient', {})
+            invoice_number = str(patient.get('invoice_number') or patient.get('hosp_id') or '')
+            created_dt = None
+            if len(snapshot_id) >= 14 and snapshot_id[:14].isdigit():
+                try:
+                    created_dt = datetime.strptime(snapshot_id[:14], "%Y%m%d%H%M%S")
+                except ValueError:
+                    created_dt = None
+            try:
+                saved_dt = datetime.strptime(saved_at, "%d/%m/%Y")
+            except ValueError:
+                saved_dt = datetime.min
+            return (created_dt or saved_dt, snapshot_id, invoice_number)
 
         def matches_search(snapshot, query):
             if not query:
@@ -1633,13 +1649,13 @@ class TDMMainWindow(QMainWindow):
             return (
                 query in (p.get('name') or '').lower() or
                 query in (p.get('pid') or '').lower() or
-                query in (p.get('hosp_id') or '').lower()
+                query in (p.get('invoice_number') or p.get('hosp_id') or '').lower()
             )
 
         def populate(card, items, edit_cb, delete_cb, row_type='sample', view_cb=None, print_cb=None):
             query = card.search_text()
             filtered = [s for s in items if matches_search(s, query)]
-            visible = list(reversed(filtered))
+            visible = sorted(filtered, key=sort_key, reverse=True)
 
             rows_layout = card._rows_lay
             while rows_layout.count():
@@ -1662,8 +1678,8 @@ class TDMMainWindow(QMainWindow):
             page = visible[start:start + self._LIST_PAGE_SIZE]
             remaining = []
 
-            for snapshot in page:
-                row = PatientRow(snapshot, row_type=row_type)
+            for offset, snapshot in enumerate(page, start=start + 1):
+                row = PatientRow(snapshot, row_type=row_type, serial_no=offset)
                 row.edit_requested.connect(edit_cb)
                 if view_cb is not None:
                     row.view_requested.connect(view_cb)
@@ -1740,6 +1756,7 @@ class TDMMainWindow(QMainWindow):
         p = snapshot.get('patient', {})
         log_draft_saved(p.get('pid', 'N/A'), p.get('name', 'N/A'))
         self._load_saved_patients()
+        self._reset_list_view(getattr(self, 'draft_list_card', None))
         self._refresh_patients_list()
         self._clear_form_state()
         self._switch_page(2)
@@ -1793,11 +1810,13 @@ class TDMMainWindow(QMainWindow):
         patient = snapshot.get('patient', {})
         self.f_name.setText(patient.get('name', '') if patient.get('name') != 'N/A' else '')
         self.f_age.setText(patient.get('age', '') if patient.get('age') != 'N/A' else '')
-        self.f_hosp_no.setText(patient.get('hosp_id', '') if patient.get('hosp_id') != 'N/A' else '')
-        self.f_report_no.setText(patient.get('ward', '') if patient.get('ward') != 'N/A' else '')
+        invoice_number = patient.get('invoice_number', patient.get('hosp_id', ''))
+        report_number = patient.get('report_number', patient.get('ward', ''))
+        self.f_hosp_no.setText(invoice_number if invoice_number != 'N/A' else '')
+        self.f_report_no.setText(report_number if report_number != 'N/A' else '')
         self.f_referred_by.setText(patient.get('dept', '') if patient.get('dept') != 'N/A' else '')
 
-        invoice_date = QDate.fromString(patient.get('weight', ''), "dd.MM.yyyy")
+        invoice_date = QDate.fromString(patient.get('invoice_date', patient.get('weight', '')), "dd.MM.yyyy")
         if invoice_date.isValid():
             self.f_invoice_date.setDate(invoice_date)
         delivery_date = QDate.fromString(patient.get('delivery_date', ''), "dd.MM.yyyy")
@@ -2077,6 +2096,7 @@ class TDMMainWindow(QMainWindow):
             self._active_record_source = 'sample'
             self._loaded_form_signature = self._form_signature()
             self._load_saved_patients()
+            self._reset_list_view(getattr(self, 'sample_list_card', None))
             self._refresh_patients_list()
             self._reset_to_sample_list_on_result_close = True
             return
@@ -2141,6 +2161,7 @@ class TDMMainWindow(QMainWindow):
         self._active_record_source = 'sample'
         self._loaded_form_signature = self._form_signature()
         self._load_saved_patients()
+        self._reset_list_view(getattr(self, 'sample_list_card', None))
         self._refresh_patients_list()
         if self._results_dialog is not None:
             if was_updating:

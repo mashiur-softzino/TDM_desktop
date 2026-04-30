@@ -366,7 +366,7 @@ class PatientRow(QFrame):
     print_requested = pyqtSignal(str)
     delete_requested = pyqtSignal(str)
 
-    def __init__(self, snapshot: dict, row_type: str = 'sample', parent=None):
+    def __init__(self, snapshot: dict, row_type: str = 'sample', serial_no: int | None = None, parent=None):
         super().__init__(parent)
         self.snapshot = snapshot
         self.setObjectName("patientRow")
@@ -439,6 +439,7 @@ class PatientRow(QFrame):
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             row.addWidget(lbl, stretch)
 
+        text_cell(str(serial_no or ""), stretch=1, alignment=Qt.AlignmentFlag.AlignCenter)
         text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=4)
         if row_type == 'sample':
             text_cell(snapshot.get('patient', {}).get('pid', 'N/A'), stretch=4)
@@ -595,6 +596,7 @@ class PatientsListCard(Card):
         hdr_lay.setContentsMargins(20, 14, 20, 14)
         hdr_lay.setSpacing(10)
         header_columns = [
+            ("SL NO", 1, Qt.AlignmentFlag.AlignCenter),
             ("NAME", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("DRUG", 2, Qt.AlignmentFlag.AlignCenter),
             ("COLLECTION DATE", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),

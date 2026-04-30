@@ -212,17 +212,17 @@ def init_db():
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS patients (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                pid        TEXT UNIQUE,
-                hosp_no    TEXT UNIQUE,
-                name       TEXT,
-                age        TEXT,
-                sex        TEXT,
-                weight     TEXT,
-                ward       TEXT,
-                dept       TEXT,
-                diagnosis  TEXT,
-                tx_date    TEXT,
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                pid            TEXT UNIQUE,
+                invoice_number TEXT UNIQUE,
+                name           TEXT,
+                age            TEXT,
+                sex            TEXT,
+                invoice_date   TEXT,
+                report_number  TEXT,
+                dept           TEXT,
+                diagnosis      TEXT,
+                tx_date        TEXT,
                 delivery_date TEXT
             );
 
@@ -297,9 +297,9 @@ def init_db():
                 name                   TEXT,
                 age                    TEXT,
                 sex                    TEXT,
-                weight                 TEXT,
-                hosp_no                TEXT,
-                ward                   TEXT,
+                invoice_date           TEXT,
+                invoice_number         TEXT,
+                report_number          TEXT,
                 dept                   TEXT,
                 diagnosis              TEXT,
                 tx_date                TEXT,
@@ -316,61 +316,85 @@ def init_db():
                 checked_by_id          INTEGER REFERENCES doctors(id)
             );
         """)
-        # Migrate: add pid column if missing (existing databases)
+        # Migrations for patients
         if not _column_exists(conn, 'patients', 'pid'):
             conn.execute("ALTER TABLE patients ADD COLUMN pid TEXT")
-            conn.commit()
+        
+        # Hospital number / Invoice number renames
+        if _column_exists(conn, 'patients', 'hosp_no') and not _column_exists(conn, 'patients', 'invoice_number'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN hosp_no TO invoice_number")
+        elif not _column_exists(conn, 'patients', 'invoice_number'):
+            conn.execute("ALTER TABLE patients ADD COLUMN invoice_number TEXT")
+            
+        if _column_exists(conn, 'patients', 'weight') and not _column_exists(conn, 'patients', 'invoice_date'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN weight TO invoice_date")
+        elif not _column_exists(conn, 'patients', 'invoice_date'):
+            conn.execute("ALTER TABLE patients ADD COLUMN invoice_date TEXT")
+
+        if _column_exists(conn, 'patients', 'ward') and not _column_exists(conn, 'patients', 'report_number'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN ward TO report_number")
+        elif not _column_exists(conn, 'patients', 'report_number'):
+            conn.execute("ALTER TABLE patients ADD COLUMN report_number TEXT")
+
         if not _column_exists(conn, 'patients', 'delivery_date'):
             conn.execute("ALTER TABLE patients ADD COLUMN delivery_date TEXT")
-            conn.commit()
+
+        # Migrations for records
         if not _column_exists(conn, 'records', 'report_path'):
             conn.execute("ALTER TABLE records ADD COLUMN report_path TEXT")
-            conn.commit()
         if not _column_exists(conn, 'records', 'sample_rows_json'):
             conn.execute("ALTER TABLE records ADD COLUMN sample_rows_json TEXT")
-            conn.commit()
         if not _column_exists(conn, 'records', 'duration_options_json'):
             conn.execute("ALTER TABLE records ADD COLUMN duration_options_json TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'report_path'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN report_path TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'sample_rows_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN sample_rows_json TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'duration_options_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN duration_options_json TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'times_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN times_json TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'concs_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN concs_json TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'drafts', 'delivery_date'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN delivery_date TEXT")
-            conn.commit()
-        if not _column_exists(conn, 'pk_results', 'auc_lss'):
-            conn.execute("ALTER TABLE pk_results ADD COLUMN auc_lss REAL")
-            conn.commit()
-        if not _column_exists(conn, 'pk_results', 'lss_equation'):
-            conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
-            conn.commit()
-
-        # Doctor migrations
         if not _column_exists(conn, 'records', 'prepared_by_id'):
             conn.execute("ALTER TABLE records ADD COLUMN prepared_by_id INTEGER")
-            conn.commit()
         if not _column_exists(conn, 'records', 'checked_by_id'):
             conn.execute("ALTER TABLE records ADD COLUMN checked_by_id INTEGER")
-            conn.commit()
+
+        # Migrations for drafts
+        if not _column_exists(conn, 'drafts', 'report_path'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN report_path TEXT")
+        if not _column_exists(conn, 'drafts', 'sample_rows_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN sample_rows_json TEXT")
+        if not _column_exists(conn, 'drafts', 'duration_options_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN duration_options_json TEXT")
+        if not _column_exists(conn, 'drafts', 'times_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN times_json TEXT")
+        if not _column_exists(conn, 'drafts', 'concs_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN concs_json TEXT")
+        
+        # Draft fields renames
+        if _column_exists(conn, 'drafts', 'hosp_no') and not _column_exists(conn, 'drafts', 'invoice_number'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN hosp_no TO invoice_number")
+        elif not _column_exists(conn, 'drafts', 'invoice_number'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_number TEXT")
+
+        if _column_exists(conn, 'drafts', 'weight') and not _column_exists(conn, 'drafts', 'invoice_date'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN weight TO invoice_date")
+        elif not _column_exists(conn, 'drafts', 'invoice_date'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_date TEXT")
+
+        if _column_exists(conn, 'drafts', 'ward') and not _column_exists(conn, 'drafts', 'report_number'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN ward TO report_number")
+        elif not _column_exists(conn, 'drafts', 'report_number'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN report_number TEXT")
+
+        if not _column_exists(conn, 'drafts', 'delivery_date'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN delivery_date TEXT")
         if not _column_exists(conn, 'drafts', 'prepared_by_id'):
             conn.execute("ALTER TABLE drafts ADD COLUMN prepared_by_id INTEGER")
-            conn.commit()
         if not _column_exists(conn, 'drafts', 'checked_by_id'):
             conn.execute("ALTER TABLE drafts ADD COLUMN checked_by_id INTEGER")
-            conn.commit()
+
+        # PK results migrations
+        if not _column_exists(conn, 'pk_results', 'auc_lss'):
+            conn.execute("ALTER TABLE pk_results ADD COLUMN auc_lss REAL")
+        if not _column_exists(conn, 'pk_results', 'lss_equation'):
+            conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
+
+        conn.commit()
         _migrate_legacy_drafts(conn)
+
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute("INSERT OR IGNORE INTO medications (name) VALUES (?)", (med,))
         
@@ -392,24 +416,24 @@ def _generate_pid() -> str:
 
 
 def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
-    hosp_no = patient.get('hosp_id', '') or ''
-    # Reuse existing patient if hospital number is real
-    if hosp_no and hosp_no != 'N/A':
+    invoice_no = patient.get('invoice_number', '') or ''
+    # Reuse existing patient if invoice number is real
+    if invoice_no and invoice_no != 'N/A':
         row = conn.execute(
-            "SELECT id FROM patients WHERE hosp_no = ?", (hosp_no,)
+            "SELECT id FROM patients WHERE invoice_number = ?", (invoice_no,)
         ).fetchone()
         if row:
             conn.execute(
                 """UPDATE patients
-                   SET name = ?, age = ?, sex = ?, weight = ?, ward = ?, dept = ?,
+                   SET name = ?, age = ?, sex = ?, invoice_date = ?, report_number = ?, dept = ?,
                        diagnosis = ?, tx_date = ?, delivery_date = ?
                    WHERE id = ?""",
                 (
                     patient.get('name'),
                     patient.get('age'),
                     patient.get('sex'),
-                    patient.get('weight'),
-                    patient.get('ward'),
+                    patient.get('invoice_date'),
+                    patient.get('report_number'),
                     patient.get('dept'),
                     patient.get('diag'),
                     patient.get('tx_date'),
@@ -421,16 +445,16 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
 
     pid = _generate_pid()
     cursor = conn.execute(
-        """INSERT INTO patients (pid, hosp_no, name, age, sex, weight, ward, dept, diagnosis, tx_date, delivery_date)
+        """INSERT INTO patients (pid, invoice_number, name, age, sex, invoice_date, report_number, dept, diagnosis, tx_date, delivery_date)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             pid,
-            hosp_no if hosp_no and hosp_no != 'N/A' else None,
+            invoice_no if invoice_no and invoice_no != 'N/A' else None,
             patient.get('name'),
             patient.get('age'),
             patient.get('sex'),
-            patient.get('weight'),
-            patient.get('ward'),
+            patient.get('invoice_date'),
+            patient.get('report_number'),
             patient.get('dept'),
             patient.get('diag'),
             patient.get('tx_date'),
@@ -449,10 +473,10 @@ def _row_to_snapshot(record: sqlite3.Row, points: list, pk_row) -> dict:
         'name':                   record['name']                   or 'N/A',
         'age':                    record['age']                    or 'N/A',
         'sex':                    record['sex']                    or '',
-        'weight':                 record['weight']                 or 'N/A',
-        'hosp_id':                record['hosp_no']                or 'N/A',
+        'invoice_date':           record['invoice_date']           or '',
+        'invoice_number':         record['invoice_number']         or 'N/A',
+        'report_number':          record['report_number']          or 'N/A',
         'pid':                    record['pid']                    or 'N/A',
-        'ward':                   record['ward']                   or 'N/A',
         'dept':                   record['dept']                   or 'N/A',
         'drug':                   record['drug']                   or '',
         'preparation':            record['preparation']            or '',
@@ -513,10 +537,10 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
         'name':                   row['name']                   or 'N/A',
         'age':                    row['age']                    or 'N/A',
         'sex':                    row['sex']                    or '',
-        'weight':                 row['weight']                 or 'N/A',
-        'hosp_id':                row['hosp_no']                or 'N/A',
+        'invoice_date':           row['invoice_date']           or '',
+        'invoice_number':         row['invoice_number']         or 'N/A',
+        'report_number':          row['report_number']          or 'N/A',
         'pid':                    'N/A',
-        'ward':                   row['ward']                   or 'N/A',
         'dept':                   row['dept']                   or 'N/A',
         'drug':                   row['drug']                   or '',
         'preparation':            row['preparation']            or '',
@@ -571,7 +595,7 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
     conn.execute(
         """INSERT OR REPLACE INTO drafts
            (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
-            name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date, delivery_date,
+            name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
             drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
@@ -585,9 +609,9 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
             patient.get('name'),
             patient.get('age'),
             patient.get('sex'),
-            patient.get('weight'),
-            patient.get('hosp_id'),
-            patient.get('ward'),
+            patient.get('invoice_date'),
+            patient.get('invoice_number'),
+            patient.get('report_number'),
             patient.get('dept'),
             patient.get('diag'),
             patient.get('tx_date'),
@@ -607,55 +631,63 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
 
 
 def _migrate_legacy_drafts(conn: sqlite3.Connection):
-    legacy_drafts = conn.execute("""
-        SELECT r.id, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json,
-               r.drug, r.preparation, r.dose, r.dose_dt, r.sample_collection_date,
-               r.co_medications, r.scheme, r.trough,
-               p.hosp_no, p.name, p.age, p.sex, p.weight, p.ward, p.dept, p.diagnosis, p.tx_date, p.delivery_date
-        FROM records r
-        LEFT JOIN patients p ON r.patient_id = p.id
-        WHERE r.record_type = 'draft'
-    """).fetchall()
-    for row in legacy_drafts:
-        points = conn.execute(
-            """SELECT time_point, concentration FROM sample_points
-               WHERE record_id = ? ORDER BY point_order""",
-            (row['id'],)
-        ).fetchall()
-        times = [p['time_point'] for p in points]
-        concs = [p['concentration'] for p in points]
-        snapshot = {
-            'id': row['id'],
-            'saved_at': row['saved_at'],
-            'report_path': row['report_path'] or '',
-            'record_type': 'draft',
-            'patient': {
-                'name': row['name'] or 'N/A',
-                'age': row['age'] or 'N/A',
-                'sex': row['sex'] or '',
-                'weight': row['weight'] or 'N/A',
-                'hosp_id': row['hosp_no'] or 'N/A',
-                'ward': row['ward'] or 'N/A',
-                'dept': row['dept'] or 'N/A',
-                'diag': row['diagnosis'] or 'N/A',
-                'tx_date': row['tx_date'] or '',
-                'delivery_date': row['delivery_date'] or '',
-                'drug': row['drug'] or '',
-                'preparation': row['preparation'] or '',
-                'dose': row['dose'] or '',
-                'dose_dt': row['dose_dt'] or '',
-                'sample_collection_date': row['sample_collection_date'] or '',
-                'med': row['co_medications'] or 'N/A',
-            },
-            'scheme': row['scheme'] or 4,
-            'duration_options': json.loads(row['duration_options_json']) if row['duration_options_json'] else [row['scheme'] or 4],
-            'sample_rows': json.loads(row['sample_rows_json']) if row['sample_rows_json'] else [],
-            'trough': row['trough'] or '',
-            'times': times,
-            'concs': concs,
-        }
-        _save_draft(conn, snapshot)
-        conn.execute("DELETE FROM records WHERE id = ?", (row['id'],))
+    try:
+        legacy_drafts = conn.execute("""
+            SELECT r.id, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json,
+                   r.drug, r.preparation, r.dose, r.dose_dt, r.sample_collection_date,
+                   r.co_medications, r.scheme, r.trough,
+                   p.invoice_number, p.name, p.age, p.sex, p.invoice_date, p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date
+            FROM records r
+            LEFT JOIN patients p ON r.patient_id = p.id
+            WHERE r.record_type = 'draft'
+        """).fetchall()
+        for row in legacy_drafts:
+            points = conn.execute(
+                """SELECT time_point, concentration FROM sample_points
+                   WHERE record_id = ? ORDER BY point_order""",
+                (row['id'],)
+            ).fetchall()
+            times = [p['time_point'] for p in points]
+            concs = [p['concentration'] for p in points]
+            snapshot = {
+                'id': row['id'],
+                'saved_at': row['saved_at'],
+                'report_path': row['report_path'] or '',
+                'record_type': 'draft',
+                'patient': {
+                    'name': row['name'] or 'N/A',
+                    'age': row['age'] or 'N/A',
+                    'sex': row['sex'] or '',
+                    'invoice_date': row['invoice_date'] or '',
+                    'invoice_number': row['invoice_number'] or 'N/A',
+                    'report_number': row['report_number'] or 'N/A',
+                    'dept': row['dept'] or 'N/A',
+                    'diag': row['diagnosis'] or 'N/A',
+                    'tx_date': row['tx_date'] or '',
+                    'delivery_date': row['delivery_date'] or '',
+                    'drug': row['drug'] or '',
+                    'preparation': row['preparation'] or '',
+                    'dose': row['dose'] or '',
+                    'dose_dt': row['dose_dt'] or '',
+                    'sample_collection_date': row['sample_collection_date'] or '',
+                    'med': row['co_medications'] or 'N/A',
+                },
+                'scheme': row['scheme'] or 4,
+                'trough': row['trough'] or '',
+                'times': times,
+                'concs': concs,
+            }
+            if row['sample_rows_json']:
+                try: snapshot['sample_rows'] = json.loads(row['sample_rows_json'])
+                except: pass
+            if row['duration_options_json']:
+                try: snapshot['duration_options'] = json.loads(row['duration_options_json'])
+                except: pass
+
+            _save_draft(conn, snapshot)
+            conn.execute("DELETE FROM records WHERE id = ?", (row['id'],))
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────
@@ -745,24 +777,19 @@ def delete_record(record_id: str):
 
 
 def load_all() -> tuple[list, list]:
-    """Return (samples, drafts) as lists of snapshot dicts.
-
-    Uses 3 bulk queries instead of 2N+1 per-record queries so performance
-    stays constant regardless of how many records exist.
-    """
+    """Return (samples, drafts) as lists of snapshot dicts."""
     with _connect() as conn:
         records = conn.execute("""
             SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
-                   r.scheme, r.trough,
-                   p.pid, p.hosp_no, p.name, p.age, p.sex, p.weight,
-                   p.ward, p.dept, p.diagnosis, p.tx_date, p.delivery_date
+                   r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
+                   p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
+                   p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date
             FROM   records r
             LEFT JOIN patients p ON r.patient_id = p.id
             ORDER  BY r.saved_at ASC, r.id ASC
         """).fetchall()
 
-        # Bulk-fetch sample points and pk results in one query each
         all_points = conn.execute(
             "SELECT record_id, time_point, concentration FROM sample_points ORDER BY record_id, point_order"
         ).fetchall()
@@ -775,19 +802,14 @@ def load_all() -> tuple[list, list]:
 
         samples = []
         for rec in records:
-            if rec['record_type'] != 'sample':
-                continue
-            snapshot = _row_to_snapshot(
-                rec,
-                points_by_id.get(rec['id'], []),
-                pk_by_id.get(rec['id']),
-            )
+            if rec['record_type'] != 'sample': continue
+            snapshot = _row_to_snapshot(rec, points_by_id.get(rec['id'], []), pk_by_id.get(rec['id']))
             samples.append(snapshot)
 
         draft_rows = conn.execute("""
             SELECT id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
-                   name, age, sex, weight, hosp_no, ward, dept, diagnosis, tx_date, delivery_date,
-                   drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough
+                   name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+                   drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id
             FROM drafts
             ORDER BY saved_at ASC, id ASC
         """).fetchall()
@@ -799,29 +821,22 @@ def load_all() -> tuple[list, list]:
 def load_duration_options(default_options: list[int]) -> list[int]:
     with _connect() as conn:
         row = conn.execute("SELECT value FROM app_settings WHERE key = 'duration_options'").fetchone()
-        if not row or not row['value']:
-            return list(default_options)
+        if not row or not row['value']: return list(default_options)
         try:
             data = json.loads(row['value'])
-        except Exception:
-            return list(default_options)
-        cleaned = []
-        for item in data:
-            try:
-                value = int(item)
-            except Exception:
-                continue
-            if value > 0 and value not in cleaned:
-                cleaned.append(value)
-        return cleaned or list(default_options)
+            cleaned = []
+            for item in data:
+                try:
+                    value = int(item)
+                    if value > 0 and value not in cleaned: cleaned.append(value)
+                except: continue
+            return cleaned or list(default_options)
+        except: return list(default_options)
 
 
 def save_duration_options(options: list[int]):
     with _connect() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('duration_options', ?)",
-            (json.dumps(options),)
-        )
+        conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('duration_options', ?)", (json.dumps(options),))
 
 
 def load_medications() -> list[str]:
@@ -834,10 +849,8 @@ def add_medication(name: str) -> bool:
     name = name.strip()
     if not name: return False
     with _connect() as conn:
-        # Case-insensitive check
         existing = conn.execute("SELECT name FROM medications WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
-        if existing:
-            return False
+        if existing: return False
         cur = conn.execute("INSERT INTO medications (name) VALUES (?)", (name,))
         return cur.rowcount > 0
 
@@ -846,13 +859,8 @@ def update_medication(old_name: str, new_name: str) -> bool:
     new_name = new_name.strip()
     if not new_name: return False
     with _connect() as conn:
-        # Check if the new name exists elsewhere (case-insensitive)
-        existing = conn.execute(
-            "SELECT name FROM medications WHERE name = ? COLLATE NOCASE AND name != ?",
-            (new_name, old_name)
-        ).fetchone()
-        if existing:
-            return False
+        existing = conn.execute("SELECT name FROM medications WHERE name = ? COLLATE NOCASE AND name != ?", (new_name, old_name)).fetchone()
+        if existing: return False
         conn.execute("UPDATE medications SET name = ? WHERE name = ?", (new_name, old_name))
         return True
 
@@ -877,19 +885,13 @@ def get_doctor_by_id(doctor_id: int) -> dict | None:
 
 def add_doctor(name: str, designation: str, signature_path: str = None) -> int:
     with _connect() as conn:
-        cur = conn.execute(
-            "INSERT INTO doctors (name, designation, signature_path) VALUES (?, ?, ?)",
-            (name, designation, signature_path)
-        )
+        cur = conn.execute("INSERT INTO doctors (name, designation, signature_path) VALUES (?, ?, ?)", (name, designation, signature_path))
         return cur.lastrowid
 
 
 def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None):
     with _connect() as conn:
-        conn.execute(
-            "UPDATE doctors SET name = ?, designation = ?, signature_path = ? WHERE id = ?",
-            (name, designation, signature_path, doctor_id)
-        )
+        conn.execute("UPDATE doctors SET name = ?, designation = ?, signature_path = ? WHERE id = ?", (name, designation, signature_path, doctor_id))
 
 
 def delete_doctor(doctor_id: int):
@@ -897,32 +899,17 @@ def delete_doctor(doctor_id: int):
         conn.execute("DELETE FROM doctors WHERE id = ?", (doctor_id,))
 
 
-# ─────────────────────────────────────────
-# One-time JSON migration
-# ─────────────────────────────────────────
-
 def migrate_from_json(json_path: Path):
-    """Import all records from saved_patients.json then rename it as .bak."""
-    if not json_path.exists():
-        return
+    if not json_path.exists(): return
     try:
         data = json.loads(json_path.read_text())
-    except Exception:
-        return
-
-    samples = data if isinstance(data, list) else data.get('samples', [])
-    drafts  = [] if isinstance(data, list) else data.get('drafts', [])
-
-    for snapshot in samples:
-        try:
-            save_record(snapshot, 'sample')
-        except Exception:
-            pass
-
-    for snapshot in drafts:
-        try:
-            save_record(snapshot, 'draft')
-        except Exception:
-            pass
-
-    json_path.rename(json_path.with_suffix('.json.bak'))
+        samples = data if isinstance(data, list) else data.get('samples', [])
+        drafts  = [] if isinstance(data, list) else data.get('drafts', [])
+        for snapshot in samples:
+            try: save_record(snapshot, 'sample')
+            except: pass
+        for snapshot in drafts:
+            try: save_record(snapshot, 'draft')
+            except: pass
+        json_path.rename(json_path.with_suffix('.json.bak'))
+    except: pass

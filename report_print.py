@@ -56,9 +56,9 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Age:",             f"{patient.get('age', 'N/A')} years")
     row("Gender:",          patient.get('sex', 'N/A'))
     row("Referred By:",     patient.get('dept', 'N/A'))
-    row("Invoice Number:",  patient.get('hosp_id', 'N/A'))
-    row("Invoice Date:",    patient.get('weight', 'N/A'))
-    row("Report Number:",   patient.get('ward', 'N/A'))
+    row("Invoice Number:",  patient.get('invoice_number', patient.get('hosp_id', 'N/A')))
+    row("Invoice Date:",    patient.get('invoice_date', patient.get('weight', 'N/A')))
+    row("Report Number:",   patient.get('report_number', patient.get('ward', 'N/A')))
     row("Delivery Date:",   patient.get('delivery_date', 'N/A'))
     row("Diagnosis:",       patient.get('diag', 'N/A'))
     row("Date of Transplant:", patient.get('tx_date', 'N/A'))
@@ -232,8 +232,8 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         '<div class="meta-grid">',
         detail_row("Patient Name", patient.get('name', 'N/A'), "Age (years)", patient.get('age', 'N/A')),
         detail_row("Gender", patient.get('sex', 'N/A'), "Referred By", patient.get('dept', 'N/A')),
-        detail_row("Invoice Number", patient.get('hosp_id', 'N/A'), "Invoice Date", patient.get('weight', 'N/A')),
-        detail_row("Report Number", patient.get('ward', 'N/A'), "Delivery Date", patient.get('delivery_date', 'N/A')),
+        detail_row("Invoice Number", patient.get('invoice_number', patient.get('hosp_id', 'N/A')), "Invoice Date", patient.get('invoice_date', patient.get('weight', 'N/A'))),
+        detail_row("Report Number", patient.get('report_number', patient.get('ward', 'N/A')), "Delivery Date", patient.get('delivery_date', 'N/A')),
         detail_row("Date of Transplant", patient.get('tx_date', 'N/A')),
         '</div>',
         f'<div class="single-row"><span class="grid-label">Diagnosis</span><span class="grid-value">{escape(patient.get("diag", "N/A"))}</span></div>',
