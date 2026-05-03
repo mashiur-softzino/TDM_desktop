@@ -1425,6 +1425,11 @@ class MedicationSelector(QFrame):
         if self._drop_frame.isVisible():
             self._show_options(self._filtered_options(self._search.text()))
 
+    def select_med(self, name: str):
+        """Public method to programmatically add a medication tag (e.g. when loading data)."""
+        if name:
+            self._add_tag(name)
+
     def get_medications(self) -> list:
         return list(self._selected)
 

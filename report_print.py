@@ -234,10 +234,9 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         detail_row("Gender", patient.get('sex', 'N/A'), "Referred By", patient.get('dept', 'N/A')),
         detail_row("Invoice Number", patient.get('invoice_number', patient.get('hosp_id', 'N/A')), "Invoice Date", patient.get('invoice_date', patient.get('weight', 'N/A'))),
         detail_row("Report Number", patient.get('report_number', patient.get('ward', 'N/A')), "Delivery Date", patient.get('delivery_date', 'N/A')),
-        detail_row("Date of Transplant", patient.get('tx_date', 'N/A')),
+        detail_row("Date of Transplant", patient.get('tx_date', 'N/A'), "Diagnosis", patient.get('diag', 'N/A')),
+        detail_row("Medication", patient.get('med', 'N/A')),
         '</div>',
-        f'<div class="single-row"><span class="grid-label">Diagnosis</span><span class="grid-value">{escape(patient.get("diag", "N/A"))}</span></div>',
-        f'<div class="single-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(patient.get("med", "N/A"))}</span></div>',
         '</div>',
         '<div class="section-block">',
         '<div class="section-title">Drug &amp; Sampling</div>',
@@ -339,18 +338,18 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .r-value {{ font-weight:700; white-space:nowrap; }}
     .result-line-interpretation {{ margin-top:0; }}
     .result-interpretation {{ font-size:15px; }}
-    .graph-wrap {{ margin:18px auto 14px; text-align:center; border-top:1px solid #DDD; padding-top:12px; }}
+    .graph-wrap {{ margin:12px auto 10px; text-align:center; border-top:1px solid #DDD; padding-top:10px; }}
     .graph-wrap img {{ width:650px; max-width:100%; height:auto; }}
     .range-note {{ margin-top:14px; font-size:15px; line-height:1.4; }}
     
-    .signature-container {{ margin-top:50px; display:flex; justify-content:space-between; padding:0 10px; }}
+    .signature-container {{ margin-top:30px; display:flex; justify-content:space-between; padding:0 10px; }}
     .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
     .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
     .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
     .doc-name {{ font-weight:700; font-size:16px; margin-bottom:2px; color:#000; line-height:1.2; }}
     .doc-desc {{ font-size:13.5px; color:#111; line-height:1.35; }}
     
-    .footer {{ margin-top:35px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
+    .footer {{ margin-top:20px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
     @media print {{
       body {{ margin:0; }}
       .page {{ width:auto; margin:0; padding:12px 12px; }}

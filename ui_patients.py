@@ -751,3 +751,255 @@ class PatientsListCard(Card):
         self._table.setVisible(not visible)
         if visible:
             self._pagination.hide()
+
+class DoctorRow(QFrame):
+    edit_requested = pyqtSignal(dict)
+    delete_requested = pyqtSignal(dict)
+
+    def __init__(self, doctor, serial_no=1):
+        super().__init__()
+        self.doctor = doctor
+        self.setFixedHeight(68)
+        self.setObjectName("doctorRow")
+        
+        accent   = "#8B5CF6" if doctor.get('type') == 'doctor' else "#0D9488" # Purple for Doctor, Teal for Tech
+        bg       = "#FBFBFF" if doctor.get('type') == 'doctor' else "#F0FDFA"
+        bg_hover = "#F5F3FF" if doctor.get('type') == 'doctor' else "#CCFBF1"
+        border   = "#DDD6FE" if doctor.get('type') == 'doctor' else "#99F6E4"
+
+        self.setStyleSheet(f"""
+            QFrame#doctorRow {{
+                background: {bg};
+                border: 1px solid {border};
+                border-left: 4px solid {accent};
+                border-radius: 14px;
+            }}
+            QFrame#doctorRow:hover {{
+                background: {bg_hover};
+                border: 1px solid {border};
+                border-left: 4px solid {accent};
+                border-radius: 14px;
+            }}
+        """)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(18, 0, 18, 0)
+        lay.setSpacing(12)
+
+        # SL NO
+        sl = QLabel(str(serial_no))
+        sl.setFixedWidth(35)
+        sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: bold; background: transparent; border: none;")
+        lay.addWidget(sl)
+
+        # Name & Type
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
+        name_col.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        
+        name_lbl = QLabel(doctor.get('name', 'N/A'))
+        name_lbl.setStyleSheet(f"color: {TEXT_CLR}; font-size: 13.5px; font-weight: 700; background: transparent; border: none;")
+        name_col.addWidget(name_lbl)
+        
+        type_str = doctor.get('type', 'doctor').upper()
+        type_bg = "#EDE9FE" if type_str == 'DOCTOR' else "#CCFBF1"
+        type_fg = "#6D28D9" if type_str == 'DOCTOR' else "#0F766E"
+        
+        type_badge = QLabel(type_str)
+        type_badge.setFixedWidth(90)
+        type_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        type_badge.setStyleSheet(f"""
+            background: {type_bg}; color: {type_fg}; 
+            border-radius: 6px; font-size: 9px; font-weight: 800; padding: 2px 4px;
+        """)
+        name_col.addWidget(type_badge)
+        lay.addLayout(name_col, 4)
+
+        # Designation
+        desc_text = doctor.get('designation', 'No designation').strip()
+        # Truncate logic: first line only, max 40 chars
+        display_desc = desc_text.split("\n")[0] if desc_text else "No designation"
+        if len(display_desc) > 40:
+            display_desc = display_desc[:37] + "..."
+        elif "\n" in desc_text:
+            display_desc += "..."
+        
+        desc_lbl = QLabel(display_desc)
+        desc_lbl.setStyleSheet(f"color: {LABEL_CLR}; font-size: 12.5px; background: transparent; border: none;")
+        lay.addWidget(desc_lbl, 5)
+
+        # Actions
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        def make_act_btn(icon_name, color, bg, hover_bg, cb):
+            btn = QPushButton()
+            btn.setFixedSize(32, 32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setIcon(qta.icon(icon_name, color=color))
+            btn.setStyleSheet(f"""
+                QPushButton {{ background: {bg}; border: none; border-radius: 12px; }}
+                QPushButton:hover {{ background: {hover_bg}; }}
+            """)
+            btn.clicked.connect(cb)
+            return btn
+
+        actions.addWidget(make_act_btn("mdi6.pencil-outline", BLUE, "#EFF6FF", "#DBEAFE", lambda: self.edit_requested.emit(doctor)))
+        actions.addWidget(make_act_btn("mdi6.trash-can-outline", RED, "#FEF2F2", "#FEE2E2", lambda: self.delete_requested.emit(doctor)))
+        
+        actions_widget = QWidget()
+        actions_widget.setFixedWidth(100)
+        actions_widget_lay = QHBoxLayout(actions_widget)
+        actions_widget_lay.setContentsMargins(0, 0, 0, 0)
+        actions_widget_lay.addLayout(actions)
+        lay.addWidget(actions_widget)
+
+
+class DoctorsListCard(Card):
+    search_changed = pyqtSignal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__("Signatory List", "mdi6.account-group-outline", icon_color="#7C3AED", parent=parent)
+        self.setGraphicsEffect(None)
+        
+        self._count_badge = QLabel("0")
+        self._count_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._count_badge.setFixedSize(24, 22)
+        self._count_badge.setStyleSheet(
+            "background: #8B5CF6; color: white; border: 2px solid #F5F3FF; "
+            "border-radius: 11px; font-size: 11px; font-weight: bold;"
+        )
+        if self._header_lay is not None:
+            # Insert after icon and title (index 2) but before stretch
+            self._header_lay.insertWidget(2, self._count_badge)
+
+        self._empty_text = "No doctors found."
+        self._empty = QLabel(self._empty_text)
+        self._empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._empty.setStyleSheet(
+            f"font-size: 13px; color: {LABEL_CLR}; background: #F8FBFF; "
+            f"border: 1px dashed #D9E6F2; border-radius: 16px; padding: 20px 28px;"
+        )
+
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Search by name...")
+        self._search_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background: transparent;
+                border: none;
+                padding: 0px;
+                font-size: 12px;
+                color: {TEXT_CLR};
+            }}
+        """)
+        self._search_edit.textChanged.connect(self.search_changed.emit)
+
+        search_wrap = QFrame()
+        search_wrap.setFixedWidth(220)
+        search_wrap.setFixedHeight(32)
+        search_wrap.setObjectName("searchWrapListDoctor")
+        search_wrap.setStyleSheet(f"""
+            QFrame#searchWrapListDoctor {{
+                background: #F4F8FC;
+                border: 1.5px solid {BORDER};
+                border-radius: 8px;
+            }}
+            QFrame#searchWrapListDoctor:focus-within {{
+                border: 1.5px solid {BLUE};
+                background: white;
+            }}
+        """)
+        sw_lay = QHBoxLayout(search_wrap)
+        sw_lay.setContentsMargins(8, 4, 8, 4)
+        sw_lay.setSpacing(6)
+        search_icon = QLabel()
+        search_icon.setPixmap(qta.icon("mdi6.magnify", color="#9BB0C8").pixmap(14, 14))
+        sw_lay.addWidget(search_icon)
+        sw_lay.addWidget(self._search_edit)
+        if self._header_lay is not None:
+            self._header_lay.addWidget(search_wrap)
+
+        self._add_btn = QPushButton("Add New Signatory")
+        self._add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._add_btn.setStyleSheet("""
+            QPushButton {
+                background: #8B5CF6; color: white; border: none; border-radius: 8px;
+                padding: 6px 14px; font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background: #7C3AED; }
+        """)
+        if self._header_lay is not None:
+            self._header_lay.addSpacing(10)
+            self._header_lay.addWidget(self._add_btn)
+
+        self._table = QFrame()
+        self._table.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F9FBFF, stop:1 #F3F8FE); "
+            f"border: none; border-radius: 24px;"
+        )
+        self._table_lay = QVBoxLayout(self._table)
+        self._table_lay.setContentsMargins(12, 12, 12, 12)
+        self._table_lay.setSpacing(10)
+
+        hdr = QFrame()
+        hdr.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #EEF4FB, stop:1 #F6F9FD); "
+            "border: none; border-radius: 18px;"
+        )
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(20, 14, 20, 14)
+        hdr_lay.setSpacing(10)
+        
+        header_columns = [
+            ("SL NO", 1, Qt.AlignmentFlag.AlignCenter),
+            ("NAME & TYPE", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("DESIGNATION / DESCRIPTION", 5, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("ACTIONS", 0, Qt.AlignmentFlag.AlignCenter),
+        ]
+        for text, stretch, alignment in header_columns:
+            lbl = QLabel(text)
+            lbl.setAlignment(alignment)
+            lbl.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: #6B7C93; "
+                "letter-spacing: 1.1px; background: transparent;"
+            )
+            if text == "ACTIONS":
+                lbl.setFixedWidth(100)
+                hdr_lay.addWidget(lbl, 0, alignment)
+            else:
+                hdr_lay.addWidget(lbl, stretch)
+        self._table_lay.addWidget(hdr)
+
+        self._rows_host = QWidget()
+        self._rows_lay = QVBoxLayout(self._rows_host)
+        self._rows_lay.setContentsMargins(0, 0, 0, 0)
+        self._rows_lay.setSpacing(6)
+        self._table_lay.addWidget(self._rows_host)
+        self._table_lay.addStretch()
+
+        self.body().addWidget(self._empty)
+        self.body().addWidget(self._table)
+
+    def search_text(self):
+        return self._search_edit.text().strip().lower()
+
+    def set_count(self, count):
+        self._count_badge.setText(str(count))
+
+    def set_empty_text(self, text=None):
+        self._empty.setText(text or self._empty_text)
+
+    def set_empty_visible(self, visible):
+        self._empty.setVisible(visible)
+        self._table.setVisible(not visible)
+
+    def clear_rows(self):
+        while self._rows_lay.count():
+            item = self._rows_lay.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+
+    def add_row(self, row_widget):
+        self._rows_lay.addWidget(row_widget)

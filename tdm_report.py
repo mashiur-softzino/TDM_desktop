@@ -30,14 +30,15 @@ from ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
                         ToastMessage, ConfirmActionModal)
 from ui_sampling import ModernSampleTable, MedicationSelector, DrugSelector
-from ui_patients import ResultsDialog, PatientRow, PatientsListCard
+from ui_patients import ResultsDialog, PatientRow, PatientsListCard, DoctorRow, DoctorsListCard
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
     QMessageBox, QDialog, QComboBox,
     QSizePolicy, QGridLayout,
-    QStackedWidget,
+    QStackedWidget, QListWidget, QListWidgetItem, QDialogButtonBox, QFileDialog,
+    QPlainTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator
@@ -98,6 +99,7 @@ class TDMMainWindow(QMainWindow):
         self.page_stack.addWidget(self._build_report_page())
         self.page_stack.addWidget(self._build_patients_page())
         self.page_stack.addWidget(self._build_drafts_page())
+        self.page_stack.addWidget(self._build_doctors_page())
         body_layout.addWidget(self.page_stack)
         body_layout.addStretch()
 
@@ -310,6 +312,57 @@ class TDMMainWindow(QMainWindow):
         lay.addWidget(self.draft_list_card)
         return page
 
+    def _build_doctors_page(self):
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(20)
+        self.doctor_list_card = DoctorsListCard()
+        self.doctor_list_card.search_changed.connect(lambda _: self._refresh_doctors_list())
+        self.doctor_list_card._add_btn.clicked.connect(self._add_doctor_from_list)
+        lay.addWidget(self.doctor_list_card)
+        return page
+
+    def _add_doctor_from_list(self):
+        dlg = DoctorEditModal(parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._refresh_doctors_list()
+            self._refresh_doctor_combos()
+
+    def _refresh_doctors_list(self):
+        if not hasattr(self, 'doctor_list_card'): return
+        self.doctor_list_card.clear_rows()
+        doctors = load_doctors()
+        query = self.doctor_list_card.search_text()
+        filtered = [d for d in doctors if query in d['name'].lower() or query in (d['designation'] or '').lower()]
+        
+        self.doctor_list_card.set_count(len(filtered))
+        
+        if not filtered:
+            self.doctor_list_card.set_empty_text("No data found" if query else None)
+            self.doctor_list_card.set_empty_visible(True)
+            return
+            
+        self.doctor_list_card.set_empty_visible(False)
+        for i, doc in enumerate(filtered, 1):
+            row = DoctorRow(doc, serial_no=i)
+            row.edit_requested.connect(self._edit_doctor_from_list)
+            row.delete_requested.connect(self._delete_doctor_from_list)
+            self.doctor_list_card.add_row(row)
+
+    def _edit_doctor_from_list(self, doctor):
+        dlg = DoctorEditModal(doctor, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._refresh_doctors_list()
+            self._refresh_doctor_combos()
+
+    def _delete_doctor_from_list(self, doctor):
+        if QMessageBox.question(self, "Delete Doctor", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
+            from database import delete_doctor
+            delete_doctor(doctor['id'])
+            self._refresh_doctors_list()
+            self._refresh_doctor_combos()
+
     def _make_tabs(self):
         wrap = QWidget()
         row = QHBoxLayout(wrap)
@@ -338,7 +391,12 @@ class TDMMainWindow(QMainWindow):
         self.drafts_tab_btn.setIcon(qta.icon("mdi6.file-document-edit-outline", color="#718096"))
         self.drafts_tab_btn.clicked.connect(lambda: self._switch_page(2))
 
-        for btn in [self.report_tab_btn, self.patients_tab_btn, self.drafts_tab_btn]:
+        self.doctors_tab_btn = QPushButton("Signatory List")
+        self.doctors_tab_btn.setObjectName("mainTab")
+        self.doctors_tab_btn.setIcon(qta.icon("mdi6.account-group-outline", color="#718096"))
+        self.doctors_tab_btn.clicked.connect(lambda: self._switch_page(3))
+
+        for btn in [self.report_tab_btn, self.patients_tab_btn, self.drafts_tab_btn, self.doctors_tab_btn]:
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(42)
             btn.setCheckable(True)
@@ -348,6 +406,7 @@ class TDMMainWindow(QMainWindow):
 
         shell_lay.addWidget(self.patients_tab_btn)
         shell_lay.addWidget(self.drafts_tab_btn)
+        shell_lay.addWidget(self.doctors_tab_btn)
 
         row.addWidget(shell)
         row.addStretch()
@@ -358,6 +417,9 @@ class TDMMainWindow(QMainWindow):
             self.sample_list_card.clear_search()
         elif index == 2 and hasattr(self, 'draft_list_card'):
             self.draft_list_card.clear_search()
+        elif index == 3 and hasattr(self, 'doctor_list_card'):
+            self.doctor_list_card._search_edit.clear()
+            self._refresh_doctors_list()
         for i in range(self.page_stack.count()):
             w = self.page_stack.widget(i)
             if i == index:
@@ -368,6 +430,7 @@ class TDMMainWindow(QMainWindow):
         self.report_tab_btn.setChecked(index == 0)
         self.patients_tab_btn.setChecked(index == 1)
         self.drafts_tab_btn.setChecked(index == 2)
+        self.doctors_tab_btn.setChecked(index == 3)
         def tab_style(kind, active):
             palette = {
                 'report': {
@@ -387,6 +450,12 @@ class TDMMainWindow(QMainWindow):
                     'border': "#FDBA74",
                     'color': "#9A3412",
                     'hover': "#FFF7ED",
+                },
+                'doctor': {
+                    'bg': "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F5F3FF, stop:1 #EDE9FE)",
+                    'border': "#C4B5FD",
+                    'color': "#5B21B6",
+                    'hover': "#F5F3FF",
                 },
             }[kind]
             if active:
@@ -426,6 +495,7 @@ class TDMMainWindow(QMainWindow):
         self.report_tab_btn.setStyleSheet(tab_style('report', index == 0))
         self.patients_tab_btn.setStyleSheet(tab_style('sample', index == 1))
         self.drafts_tab_btn.setStyleSheet(tab_style('draft', index == 2))
+        self.doctors_tab_btn.setStyleSheet(tab_style('doctor', index == 3))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1341,29 +1411,7 @@ class TDMMainWindow(QMainWindow):
         check_col.addWidget(self.checked_by_combo)
         row.addLayout(check_col, 1)
         
-        manage_row = QHBoxLayout()
-        manage_row.addStretch()
-        
-        manage_btn = QPushButton(" Manage Doctors")
-        manage_btn.setIcon(qta.icon("mdi6.account-cog-outline", color="#166534"))
-        manage_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        manage_btn.setStyleSheet("""
-            QPushButton {
-                background: #DCFCE7;
-                color: #166534;
-                border: 1.5px solid #86EFAC;
-                border-radius: 12px;
-                padding: 8px 16px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background: #BBF7D0; }
-        """)
-        manage_btn.clicked.connect(self._manage_doctors)
-        manage_row.addWidget(manage_btn)
-        
         lay.addLayout(row)
-        lay.addLayout(manage_row)
         
         card.body().addLayout(lay)
         # Populate initially
@@ -1375,12 +1423,15 @@ class TDMMainWindow(QMainWindow):
         self.prep_by_combo.clear()
         self.checked_by_combo.clear()
         
-        self.prep_by_combo.addItem("Select Doctor...", 0)
+        self.prep_by_combo.addItem("Select Technologist...", 0)
         self.checked_by_combo.addItem("Select Doctor...", 0)
         
         for d in doctors:
-            self.prep_by_combo.addItem(d['name'], d['id'])
-            self.checked_by_combo.addItem(d['name'], d['id'])
+            dtype = d.get('type', 'doctor')
+            if dtype == 'technologist':
+                self.prep_by_combo.addItem(d['name'], d['id'])
+            else:
+                self.checked_by_combo.addItem(d['name'], d['id'])
             
         if select_prep_id:
             idx = self.prep_by_combo.findData(select_prep_id)
@@ -2375,22 +2426,32 @@ class DoctorEditModal(QDialog):
         super().__init__(parent)
         self.doctor = doctor
         self.setWindowTitle("Add Doctor" if not doctor else "Edit Doctor")
-        self.setMinimumSize(400, 450)
+        self.setMinimumSize(520, 620)
         self.setStyleSheet("background: white;")
         
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 24, 24, 24)
         lay.setSpacing(16)
         
-        lay.addWidget(small_label("DOCTOR NAME"))
+        lay.addWidget(small_label("NAME"))
         self.name_edit = QLineEdit(doctor['name'] if doctor else "")
         self.name_edit.setStyleSheet(self._input_style())
         lay.addWidget(self.name_edit)
+
+        lay.addWidget(small_label("TYPE"))
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Doctor", "Technologist"])
+        self.type_combo.setStyleSheet(self._input_style())
+        if doctor and doctor.get('type'):
+            self.type_combo.setCurrentText(doctor['type'].capitalize())
+        lay.addWidget(self.type_combo)
         
         lay.addWidget(small_label("DESIGNATION / DEGREE (DESCRIPTION)"))
-        self.desc_edit = QLineEdit(doctor['designation'] if doctor else "")
-        self.desc_edit.setPlaceholderText("e.g. MBBS, MD (Nephrology)")
+        self.desc_edit = QPlainTextEdit()
+        self.desc_edit.setPlainText(doctor['designation'] if doctor else "")
+        self.desc_edit.setPlaceholderText("e.g.\nMBBS, BCS (Health)\nFCPS (Medicine)")
         self.desc_edit.setStyleSheet(self._input_style())
+        self.desc_edit.setFixedHeight(120)
         lay.addWidget(self.desc_edit)
         
         lay.addWidget(small_label("DIGITAL SIGNATURE"))
@@ -2423,11 +2484,11 @@ class DoctorEditModal(QDialog):
         
     def _input_style(self):
         return """
-            QLineEdit {
+            QLineEdit, QPlainTextEdit {
                 background: #F1F5F9; border: 1.5px solid #E2E8F0; border-radius: 10px;
-                padding: 10px 14px; font-size: 14px;
+                padding: 10px 14px; font-size: 14px; color: #1E293B;
             }
-            QLineEdit:focus { border-color: #3B82F6; background: white; }
+            QLineEdit:focus, QPlainTextEdit:focus { border-color: #3B82F6; background: white; }
         """
         
     def _upload_sig(self):
@@ -2456,12 +2517,13 @@ class DoctorEditModal(QDialog):
             
     def _save(self):
         name = self.name_edit.text().strip()
-        desc = self.desc_edit.text().strip()
+        desc = self.desc_edit.toPlainText().strip()
+        type_str = self.type_combo.currentText().lower()
         if not name:
-            QMessageBox.warning(self, "Required", "Doctor name is required.")
+            QMessageBox.warning(self, "Required", "Name is required.")
             return
         if self.doctor:
-            update_doctor(self.doctor['id'], name, desc, self.sig_path)
+            update_doctor(self.doctor['id'], name, desc, self.sig_path, type=type_str)
         else:
-            add_doctor(name, desc, self.sig_path)
+            add_doctor(name, desc, self.sig_path, type=type_str)
         self.accept()

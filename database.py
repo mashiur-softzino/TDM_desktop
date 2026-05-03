@@ -243,7 +243,8 @@ def init_db():
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 name           TEXT NOT NULL,
                 designation    TEXT,
-                signature_path TEXT
+                signature_path TEXT,
+                type           TEXT NOT NULL DEFAULT 'doctor'
             );
 
             CREATE TABLE IF NOT EXISTS records (
@@ -329,6 +330,9 @@ def init_db():
                 checked_by_id          INTEGER REFERENCES doctors(id)
             );
         """)
+        if not _column_exists(conn, "doctors", "type"):
+            conn.execute("ALTER TABLE doctors ADD COLUMN type TEXT NOT NULL DEFAULT 'doctor'")
+
         # Migrations for patients
         if not _column_exists(conn, 'patients', 'pid'):
             conn.execute("ALTER TABLE patients ADD COLUMN pid TEXT")
@@ -896,15 +900,15 @@ def get_doctor_by_id(doctor_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def add_doctor(name: str, designation: str, signature_path: str = None) -> int:
+def add_doctor(name: str, designation: str, signature_path: str = None, type: str = 'doctor') -> int:
     with _connect() as conn:
-        cur = conn.execute("INSERT INTO doctors (name, designation, signature_path) VALUES (?, ?, ?)", (name, designation, signature_path))
+        cur = conn.execute("INSERT INTO doctors (name, designation, signature_path, type) VALUES (?, ?, ?, ?)", (name, designation, signature_path, type))
         return cur.lastrowid
 
 
-def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None):
+def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None, type: str = 'doctor'):
     with _connect() as conn:
-        conn.execute("UPDATE doctors SET name = ?, designation = ?, signature_path = ? WHERE id = ?", (name, designation, signature_path, doctor_id))
+        conn.execute("UPDATE doctors SET name = ?, designation = ?, signature_path = ?, type = ? WHERE id = ?", (name, designation, signature_path, type, doctor_id))
 
 
 def delete_doctor(doctor_id: int):
