@@ -2532,7 +2532,7 @@ class DoctorEditModal(QDialog):
         super().__init__(parent)
         self.doctor = doctor
         self.setWindowTitle("Add Signatory" if not doctor else "Edit Signatory")
-        self.setFixedWidth(500)
+        self.setFixedWidth(800)
         self.setModal(True)
         self.setStyleSheet("QDialog { background: white; border-radius: 20px; }")
         
@@ -2548,7 +2548,7 @@ class DoctorEditModal(QDialog):
         banner = QFrame()
         banner.setStyleSheet(f"""
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #16A34A, stop:1 #22C55E);
+                stop:0 #7C3AED, stop:1 #8B5CF6);
             border-top-left-radius: 12px;
             border-top-right-radius: 12px;
         """)
@@ -2578,9 +2578,13 @@ class DoctorEditModal(QDialog):
         # ── Body ────────────────────────────────
         body = QWidget()
         body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(24, 24, 24, 24)
-        body_lay.setSpacing(16)
+        body_lay.setContentsMargins(32, 28, 32, 28)
+        body_lay.setSpacing(20)
         
+        # Row 1: Name & Type
+        row1 = QHBoxLayout()
+        row1.setSpacing(24)
+
         # Name
         name_sec = QVBoxLayout()
         name_sec.setSpacing(8)
@@ -2589,7 +2593,7 @@ class DoctorEditModal(QDialog):
         self.name_edit.setPlaceholderText("e.g. Dr. John Doe")
         self.name_edit.setStyleSheet(self._input_style())
         name_sec.addWidget(self.name_edit)
-        body_lay.addLayout(name_sec)
+        row1.addLayout(name_sec, 3)
 
         # Type
         type_sec = QVBoxLayout()
@@ -2607,61 +2611,83 @@ class DoctorEditModal(QDialog):
         if doctor and doctor.get('type'):
             self.type_combo.setCurrentText(doctor['type'].capitalize())
         type_sec.addWidget(self.type_combo)
-        body_lay.addLayout(type_sec)
+        row1.addLayout(type_sec, 2)
+        body_lay.addLayout(row1)
         
+        # Row 2: Description & Phone
+        row2 = QHBoxLayout()
+        row2.setSpacing(24)
+
         # Description
         desc_sec = QVBoxLayout()
         desc_sec.setSpacing(8)
         desc_sec.addWidget(small_label("DESCRIPTION", color="#64748B", size=10, bold=True))
         self.desc_edit = QPlainTextEdit()
         self.desc_edit.setPlainText(doctor['designation'] if doctor else "")
-        self.desc_edit.setPlaceholderText("e.g.\nDegrees, Department, or other info...")
+        self.desc_edit.setPlaceholderText("e.g. Degrees, Department...")
         self.desc_edit.setStyleSheet(self._input_style())
-        self.desc_edit.setFixedHeight(100)
+        self.desc_edit.setFixedHeight(120)
         desc_sec.addWidget(self.desc_edit)
-        body_lay.addLayout(desc_sec)
+        row2.addLayout(desc_sec, 4)
 
         # Phone Number
         phone_sec = QVBoxLayout()
         phone_sec.setSpacing(8)
-        phone_sec.addWidget(small_label("PHONE NUMBER", color="#64748B", size=10, bold=True))
+        phone_label = QHBoxLayout()
+        phone_label.setSpacing(4)
+        phone_label.addWidget(small_label("PHONE NUMBER", color="#64748B", size=10, bold=True))
+        req_star = QLabel("*")
+        req_star.setStyleSheet("color: #DC2626; font-size: 14px; font-weight: bold; background: transparent;")
+        phone_label.addWidget(req_star)
+        phone_label.addStretch()
+        phone_sec.addLayout(phone_label)
+        
         self.phone_edit = QLineEdit(doctor.get('phone', '') if doctor else "")
         self.phone_edit.setPlaceholderText("e.g. +880 1XXX-XXXXXX")
         self.phone_edit.setStyleSheet(self._input_style())
         phone_sec.addWidget(self.phone_edit)
-        body_lay.addLayout(phone_sec)
+        phone_sec.addStretch() # Push to top
+        row2.addLayout(phone_sec, 3)
         
-        # Signature
+        body_lay.addLayout(row2)
+        
+        # Signature Section
         sig_sec = QVBoxLayout()
-        sig_sec.setSpacing(12)
+        sig_sec.setSpacing(10)
         sig_sec.addWidget(small_label("DIGITAL SIGNATURE", color="#64748B", size=10, bold=True))
         
+        sig_row = QHBoxLayout()
+        sig_row.setSpacing(16)
+
         sig_box = QFrame()
         sig_box.setStyleSheet("background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 12px;")
         sig_box_lay = QVBoxLayout(sig_box)
-        sig_box_lay.setContentsMargins(10, 10, 10, 10)
+        sig_box_lay.setContentsMargins(8, 8, 8, 8)
         
         self.sig_label = QLabel()
-        self.sig_label.setFixedSize(220, 80)
+        self.sig_label.setFixedSize(280, 100)
         self.sig_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sig_label.setStyleSheet("background: transparent; color: #94A3B8; font-size: 11px;")
         self.sig_path = doctor['signature_path'] if doctor else None
         self._update_sig_preview()
-        sig_box_lay.addWidget(self.sig_label, 0, Qt.AlignmentFlag.AlignHCenter)
-        sig_sec.addWidget(sig_box)
-        
-        upload_btn = QPushButton("Upload Signature Image")
+        sig_box_lay.addWidget(self.sig_label)
+        sig_row.addWidget(sig_box, 2)
+
+        upload_btn = QPushButton("Upload Signature")
+        upload_btn.setFixedHeight(100)
         upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        upload_btn.setFixedHeight(38)
+        upload_btn.setIcon(qta.icon("mdi6.upload", color="#2563EB"))
         upload_btn.setStyleSheet("""
             QPushButton {
                 background: #EFF6FF; color: #2563EB; border: 1.5px solid #BFDBFE;
-                border-radius: 8px; padding: 8px; font-weight: bold;
+                border-radius: 12px; padding: 8px; font-weight: bold; font-size: 13px;
             }
             QPushButton:hover { background: #DBEAFE; }
         """)
         upload_btn.clicked.connect(self._upload_sig)
-        sig_sec.addWidget(upload_btn)
+        sig_row.addWidget(upload_btn, 1)
+        
+        sig_sec.addLayout(sig_row)
         body_lay.addLayout(sig_sec)
         
         body_lay.addSpacing(10)
@@ -2691,11 +2717,11 @@ class DoctorEditModal(QDialog):
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.setStyleSheet("""
             QPushButton {
-                background: #16A34A; color: white;
+                background: #7C3AED; color: white;
                 border: none; border-radius: 10px;
                 font-size: 13px; font-weight: bold; padding: 0 24px;
             }
-            QPushButton:hover { background: #15803D; }
+            QPushButton:hover { background: #6D28D9; }
         """)
         save_btn.clicked.connect(self._save)
         
@@ -2709,9 +2735,9 @@ class DoctorEditModal(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, '_toast'):
-            width = self.width() - 48
+            width = 300
             self._toast.setFixedWidth(width)
-            self._toast.move(24, 24)
+            self._toast.move(self.width() - width - 24, 24)
 
     def _show_error(self, title, msg):
         self._toast.show_message(title, msg, tone="warning")
