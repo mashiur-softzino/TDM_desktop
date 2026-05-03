@@ -22,7 +22,7 @@ from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 
-from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR,
+from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
                            DEFAULT_DURATION_OPTIONS,
                            BASE_SAMPLE_TIMES, PATIENTS_FILE, STYLE,
                            sampling_times_for_duration, make_shadow, small_label)
@@ -334,7 +334,7 @@ class TDMMainWindow(QMainWindow):
         self.doctor_list_card.clear_rows()
         doctors = load_doctors()
         query = self.doctor_list_card.search_text()
-        filtered = [d for d in doctors if query in d['name'].lower() or query in (d['designation'] or '').lower()]
+        filtered = [d for d in doctors if query in d['name'].lower() or query in (d.get('designation') or '').lower() or query in (d.get('phone') or '').lower()]
         
         self.doctor_list_card.set_count(len(filtered))
         
@@ -344,7 +344,7 @@ class TDMMainWindow(QMainWindow):
             return
             
         self.doctor_list_card.set_empty_visible(False)
-        for i, doc in enumerate(filtered, 1):
+        for i, doc in enumerate(reversed(filtered), 1):
             row = DoctorRow(doc, serial_no=i)
             row.edit_requested.connect(self._edit_doctor_from_list)
             row.delete_requested.connect(self._delete_doctor_from_list)
@@ -357,7 +357,7 @@ class TDMMainWindow(QMainWindow):
             self._refresh_doctor_combos()
 
     def _delete_doctor_from_list(self, doctor):
-        if QMessageBox.question(self, "Delete Doctor", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, "Delete Signatory", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
             from database import delete_doctor
             delete_doctor(doctor['id'])
             self._refresh_doctors_list()
@@ -672,7 +672,7 @@ class TDMMainWindow(QMainWindow):
                 selection-color: white;
             }}
             QLineEdit::placeholder {{
-                color: #95A3B7;
+                color: rgba(0, 0, 0, 0.22);
             }}
         """
         combo_style = f"""
@@ -751,7 +751,9 @@ class TDMMainWindow(QMainWindow):
 
         self.f_diag    = field("e.g. Post Renal Transplant")
         self.f_diag.setText("Post Renal Transplant")
-        for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by, self.f_diag]:
+        self.f_phone   = field("Enter phone number")
+        self.f_phone.setMaxLength(15)
+        for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by, self.f_diag, self.f_phone]:
             edit.textChanged.connect(self._on_data_changed)
 
         # Sex selector
@@ -787,10 +789,10 @@ class TDMMainWindow(QMainWindow):
             if label == "Patient Name":
                 lbl = QLabel('PATIENT NAME <span style="color:#E53935;">*</span>')
                 lbl.setTextFormat(Qt.TextFormat.RichText)
-                lbl.setStyleSheet("color: #7E8DA3; font-size: 10px; font-weight: bold; letter-spacing: 0.8px;")
+                lbl.setStyleSheet("color: #111111; font-size: 12px; font-weight: bold; letter-spacing: 0.8px;")
                 col_lbl.addWidget(lbl)
             else:
-                col_lbl.addWidget(small_label(label, color="#7E8DA3", size=10, bold=True))
+                col_lbl.addWidget(small_label(label, color="#111111", size=12, bold=True))
             col_lbl.addWidget(widget)
             layout.addLayout(col_lbl, row, col, 1, span)
 
@@ -838,6 +840,9 @@ class TDMMainWindow(QMainWindow):
         add_field(demo_grid, 1, 2, "Report Number", self.f_report_no)
         add_field(demo_grid, 1, 3, "Delivery Date", self.f_delivery_date)
 
+        # Row 2: Phone Number
+        add_field(demo_grid, 2, 0, "Phone Number", self.f_phone)
+
         demographics_lay.addLayout(demo_grid)
         card.body().addWidget(demographics_box)
 
@@ -880,7 +885,7 @@ class TDMMainWindow(QMainWindow):
 
         date_section = QVBoxLayout()
         date_section.setSpacing(8)
-        date_section.addWidget(small_label("Date of Transplant", color="#7E8DA3", size=10, bold=True))
+        date_section.addWidget(small_label("Date of Transplant", color="#111111", size=12, bold=True))
         self.f_tx_date.setMinimumWidth(400)
         self.f_tx_date.setMaximumWidth(400)
         date_section.addWidget(self.f_tx_date)
@@ -888,7 +893,7 @@ class TDMMainWindow(QMainWindow):
 
         diag_section = QVBoxLayout()
         diag_section.setSpacing(6)
-        diag_section.addWidget(small_label("Diagnosis", color="#7E8DA3", size=10, bold=True))
+        diag_section.addWidget(small_label("Diagnosis", color="#111111", size=12, bold=True))
         self.f_diag.setMinimumWidth(400)
         self.f_diag.setMaximumWidth(400)
         self.f_diag.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -902,7 +907,7 @@ class TDMMainWindow(QMainWindow):
         med_col = QVBoxLayout()
         med_col.setSpacing(8)
         med_col.setContentsMargins(0, 0, 0, 0)
-        med_col.addWidget(small_label("Medications", color="#7E8DA3", size=10, bold=True))
+        med_col.addWidget(small_label("Medications", color="#111111", size=12, bold=True))
         self.f_med.setMinimumWidth(400)
         self.f_med.setMaximumWidth(400)
         med_col.addWidget(self.f_med, 0, Qt.AlignmentFlag.AlignTop)
@@ -945,7 +950,7 @@ class TDMMainWindow(QMainWindow):
                 border: 1px solid {BLUE};
             }}
             QLineEdit::placeholder {{
-                color: #95A3B7;
+                color: rgba(0, 0, 0, 0.22);
             }}
         """
         def field(placeholder):
@@ -984,9 +989,9 @@ class TDMMainWindow(QMainWindow):
             if required:
                 lbl = QLabel(f'{label.upper()} <span style="color:#E53935;">*</span>')
                 lbl.setTextFormat(Qt.TextFormat.RichText)
-                lbl.setStyleSheet("color: #7E8DA3; font-size: 10px; font-weight: bold; letter-spacing: 0.8px;")
+                lbl.setStyleSheet("color: #111111; font-size: 12px; font-weight: bold; letter-spacing: 0.8px;")
             else:
-                lbl = small_label(label, color="#7E8DA3", size=10, bold=True)
+                lbl = small_label(label, color="#111111", size=12, bold=True)
             col_lay.addWidget(lbl)
             col_lay.addWidget(widget)
             meta_grid.addLayout(col_lay, row, col)
@@ -1127,7 +1132,7 @@ class TDMMainWindow(QMainWindow):
         direct_lay.setSpacing(8)
         direct_lay.addWidget(small_label(
             "AUC₀₋₁₂ (mg·h/L) — enter known value directly",
-            color="#7E8DA3", size=10, bold=True, uppercase=False
+            color="#111111", size=12, bold=True, uppercase=False
         ))
         self._direct_auc_edit = QLineEdit()
         self._direct_auc_edit.setPlaceholderText("e.g. 45.5")
@@ -1163,7 +1168,7 @@ class TDMMainWindow(QMainWindow):
 
         # Trough input
         trough_col = QVBoxLayout(); trough_col.setSpacing(8)
-        trough_col.addWidget(small_label("Trough (Pre-dose) Concentration (µg/mL)", color="#7E8DA3", size=10, bold=True, uppercase=False))
+        trough_col.addWidget(small_label("Trough (Pre-dose) Concentration (µg/mL)", color="#111111", size=12, bold=True, uppercase=False))
         self.trough_edit = QLineEdit()
         self.trough_edit.setPlaceholderText("e.g. 2.93")
         self.trough_edit.setFixedWidth(200)
@@ -1195,7 +1200,7 @@ class TDMMainWindow(QMainWindow):
         # Duration controls
         dur_col = QVBoxLayout(); dur_col.setSpacing(8)
         dur_col.setContentsMargins(0, 8, 0, 0)
-        dur_col.addWidget(small_label("Number of Samples", color="#7E8DA3", size=10, bold=True))
+        dur_col.addWidget(small_label("Number of Samples", color="#111111", size=12, bold=True))
         self._duration_wrap = QWidget()
         self._duration_row = QHBoxLayout(self._duration_wrap)
         self._duration_row.setContentsMargins(0, 0, 0, 0)
@@ -1253,7 +1258,7 @@ class TDMMainWindow(QMainWindow):
         multi_lay.addLayout(top_row)
         # ── Modern sample table ──
         table_col = QVBoxLayout(); table_col.setSpacing(8)
-        table_col.addWidget(small_label("Sample Points", color="#7E8DA3", size=10, bold=True))
+        table_col.addWidget(small_label("Sample Points", color="#111111", size=12, bold=True))
         self.sample_table = ModernSampleTable()
         self.sample_table.data_changed.connect(self._on_data_changed)
         table_col.addWidget(self.sample_table)
@@ -1379,18 +1384,39 @@ class TDMMainWindow(QMainWindow):
         
         row = QHBoxLayout()
         row.setSpacing(16)
+
+        import tempfile, os
+        _arrow_path = os.path.join(tempfile.gettempdir(), "tdm_sig_arrow_down.png")
+        qta.icon("mdi6.chevron-down", color="#166534").pixmap(14, 14).save(_arrow_path)
+        _arrow_path = _arrow_path.replace("\\", "/")
         
-        combo_style = """
-            QComboBox {
+        combo_style = f"""
+            QComboBox {{
                 background: #F0FDF4;
                 border: 1.5px solid #BBF7D0;
                 border-radius: 14px;
-                padding: 10px 14px;
+                padding: 10px 42px 10px 14px;
                 font-size: 14px;
                 color: #14532D;
-            }
-            QComboBox::drop-down { border: none; width: 30px; }
-            QComboBox::down-arrow { image: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid #166534; margin-right: 10px; }
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 34px;
+                border-top-right-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{_arrow_path}");
+                width: 14px;
+                height: 14px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 1px solid #BBF7D0;
+                selection-background-color: #DCFCE7;
+                selection-color: #14532D;
+                outline: none;
+            }}
         """
 
         # Prepared By
@@ -1426,7 +1452,7 @@ class TDMMainWindow(QMainWindow):
         self.prep_by_combo.addItem("Select Technologist...", 0)
         self.checked_by_combo.addItem("Select Doctor...", 0)
         
-        for d in doctors:
+        for d in reversed(doctors):
             dtype = d.get('type', 'doctor')
             if dtype == 'technologist':
                 self.prep_by_combo.addItem(d['name'], d['id'])
@@ -1569,6 +1595,7 @@ class TDMMainWindow(QMainWindow):
             'diag': self.f_diag.text().strip() or 'N/A',
             'tx_date': d_tx.toString("dd.MM.yyyy") if d_tx else 'N/A',
             'med': self.f_med.get_text() or 'N/A',
+            'phone': self.f_phone.text().strip() or 'N/A',
         }
 
     def _form_signature(self):
@@ -1702,6 +1729,7 @@ class TDMMainWindow(QMainWindow):
             return (
                 query in (p.get('name') or '').lower() or
                 query in (p.get('pid') or '').lower() or
+                query in (p.get('phone') or '').lower() or
                 query in (p.get('invoice_number') or p.get('hosp_id') or '').lower()
             )
 
@@ -1868,6 +1896,7 @@ class TDMMainWindow(QMainWindow):
         self.f_hosp_no.setText(invoice_number if invoice_number != 'N/A' else '')
         self.f_report_no.setText(report_number if report_number != 'N/A' else '')
         self.f_referred_by.setText(patient.get('dept', '') if patient.get('dept') != 'N/A' else '')
+        self.f_phone.setText(patient.get('phone', '') if patient.get('phone') != 'N/A' else '')
 
         invoice_date = QDate.fromString(patient.get('invoice_date', patient.get('weight', '')), "dd.MM.yyyy")
         if invoice_date.isValid():
@@ -2286,7 +2315,7 @@ class TDMMainWindow(QMainWindow):
             delattr(self, '_report_snapshot')
         for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by,
                      self.f_dose,
-                     self.f_diag, self.trough_edit]:
+                     self.f_diag, self.trough_edit, self.f_phone]:
             edit.clear()
         self.f_drug.setCurrentIndex(0)
         self.f_preparation.setText("Mycophenolate Mofetil (MMF)")
@@ -2323,79 +2352,154 @@ class TDMMainWindow(QMainWindow):
 class DoctorManagementModal(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Manage Doctors")
-        self.setMinimumSize(500, 500)
-        self.setStyleSheet(f"background: white; border-radius: 12px;")
+        self.setWindowTitle("Manage Signatories")
+        self.setFixedWidth(550)
+        self.setFixedHeight(600)
+        self.setModal(True)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background: white;
+                border-radius: 20px;
+            }}
+        """)
         
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 20, 20, 20)
-        lay.setSpacing(16)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
         
-        header = QLabel("Manage Signatories")
-        header.setStyleSheet(f"color: {TEXT_CLR}; font-size: 18px; font-weight: bold;")
-        lay.addWidget(header)
+        # ── Top colored banner ──────────────────
+        banner = QFrame()
+        banner.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #1E293B, stop:1 #334155);
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+        """)
+        banner_lay = QHBoxLayout(banner)
+        banner_lay.setContentsMargins(24, 20, 24, 20)
+        banner_lay.setSpacing(14)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(40, 40)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.account-cog", color="white").pixmap(22, 22))
+        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.15); border-radius: 20px;")
+        banner_lay.addWidget(icon_lbl)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
+        t = QLabel("Manage Signatories")
+        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
+        s = QLabel("Configure doctors and technologists for reports")
+        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.7); background: transparent;")
+        title_col.addWidget(t)
+        title_col.addWidget(s)
+        banner_lay.addLayout(title_col)
+        banner_lay.addStretch()
+        
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,0.1); color: white;
+                border: none; border-radius: 15px; font-size: 18px; font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.2); }
+        """)
+        close_btn.clicked.connect(self.reject)
+        banner_lay.addWidget(close_btn)
+        
+        lay.addWidget(banner)
+        
+        # ── Body ────────────────────────────────
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(24, 24, 24, 24)
+        body_lay.setSpacing(18)
         
         self.list_widget = QListWidget()
+        self.list_widget.setSpacing(6)
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
                 background: #F8FAFC;
                 border: 1.5px solid #E2E8F0;
-                border-radius: 12px;
-                padding: 8px;
+                border-radius: 16px;
+                padding: 10px;
+                outline: none;
             }}
             QListWidget::item {{
                 background: white;
                 border: 1px solid #F1F5F9;
-                border-radius: 8px;
-                margin-bottom: 6px;
-                padding: 10px;
+                border-radius: 12px;
+                padding: 12px;
+                color: {TEXT_CLR};
+                margin-bottom: 2px;
             }}
-            QListWidget::item:selected {{ background: #EFF6FF; border-color: #BFDBFE; color: {TEXT_CLR}; }}
+            QListWidget::item:hover {{
+                background: #F1F5F9;
+            }}
+            QListWidget::item:selected {{
+                background: #EFF6FF;
+                border: 1.5px solid #3B82F6;
+                color: #2563EB;
+            }}
         """)
-        lay.addWidget(self.list_widget)
+        body_lay.addWidget(self.list_widget)
         
         btn_row = QHBoxLayout()
-        add_btn = QPushButton("Add New Doctor")
+        btn_row.setSpacing(10)
+        
+        add_btn = QPushButton("Add New Signatory")
+        add_btn.setFixedHeight(40)
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.setStyleSheet("""
             QPushButton {
-                background: #16A34A; color: white; border: none; border-radius: 8px;
-                padding: 8px 16px; font-weight: bold;
+                background: #16A34A; color: white; border: none; border-radius: 10px;
+                padding: 0 16px; font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: #15803D; }
         """)
         add_btn.clicked.connect(self._add_doctor)
         
-        edit_btn = QPushButton("Edit Selected")
+        edit_btn = QPushButton("Edit")
+        edit_btn.setFixedHeight(40)
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.setStyleSheet("""
             QPushButton {
-                background: #F1F5F9; color: #475569; border: 1px solid #E2E8F0;
-                border-radius: 8px; padding: 8px 16px; font-weight: bold;
+                background: #F1F5F9; color: #475569; border: 1.5px solid #E2E8F0;
+                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: #E2E8F0; }
         """)
         edit_btn.clicked.connect(self._edit_doctor)
         
         del_btn = QPushButton("Delete")
+        del_btn.setFixedHeight(40)
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         del_btn.setStyleSheet("""
             QPushButton {
-                background: #FEF2F2; color: #DC2626; border: 1px solid #FEE2E2;
-                border-radius: 8px; padding: 8px 16px; font-weight: bold;
+                background: #FEF2F2; color: #DC2626; border: 1.5px solid #FEE2E2;
+                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
             }
-            QPushButton:hover { background: #FEE2E2; }
+            QPushButton:hover { background: #DC2626; color: white; border-color: #B91C1C; }
         """)
         del_btn.clicked.connect(self._delete_doctor)
         
         btn_row.addWidget(add_btn)
+        btn_row.addStretch()
         btn_row.addWidget(edit_btn)
         btn_row.addWidget(del_btn)
-        lay.addLayout(btn_row)
+        body_lay.addLayout(btn_row)
+        
+        lay.addWidget(body)
         
         self._refresh_list()
         
     def _refresh_list(self):
         self.list_widget.clear()
         doctors = load_doctors()
-        for d in doctors:
+        for d in reversed(doctors):
             item = QListWidgetItem(f"{d['name']} ({d['designation'] or 'No designation'})")
             item.setData(Qt.ItemDataRole.UserRole, d)
             self.list_widget.addItem(item)
@@ -2417,54 +2521,138 @@ class DoctorManagementModal(QDialog):
         item = self.list_widget.currentItem()
         if not item: return
         doctor = item.data(Qt.ItemDataRole.UserRole)
-        if QMessageBox.question(self, "Delete Doctor", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, "Delete Signatory", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
             delete_doctor(doctor['id'])
             self._refresh_list()
+
+from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
 class DoctorEditModal(QDialog):
     def __init__(self, doctor=None, parent=None):
         super().__init__(parent)
         self.doctor = doctor
-        self.setWindowTitle("Add Doctor" if not doctor else "Edit Doctor")
-        self.setMinimumSize(520, 620)
-        self.setStyleSheet("background: white;")
+        self.setWindowTitle("Add Signatory" if not doctor else "Edit Signatory")
+        self.setFixedWidth(500)
+        self.setModal(True)
+        self.setStyleSheet("QDialog { background: white; border-radius: 20px; }")
         
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(24, 24, 24, 24)
-        lay.setSpacing(16)
-        
-        lay.addWidget(small_label("NAME"))
-        self.name_edit = QLineEdit(doctor['name'] if doctor else "")
-        self.name_edit.setStyleSheet(self._input_style())
-        lay.addWidget(self.name_edit)
+        # Toast Message for validation
+        self._toast = ToastMessage(self)
+        self._toast.hide()
 
-        lay.addWidget(small_label("TYPE"))
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        
+        # ── Top colored banner ──────────────────
+        banner = QFrame()
+        banner.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #16A34A, stop:1 #22C55E);
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
+        """)
+        banner_lay = QHBoxLayout(banner)
+        banner_lay.setContentsMargins(24, 20, 24, 20)
+        banner_lay.setSpacing(14)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(40, 40)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setPixmap(qta.icon("mdi6.account-plus" if not doctor else "mdi6.account-edit", color="white").pixmap(22, 22))
+        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.2); border-radius: 20px;")
+        banner_lay.addWidget(icon_lbl)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
+        t = QLabel("Add New Signatory" if not doctor else "Edit Signatory Details")
+        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
+        s = QLabel("Enter signatory name, description, phone and signature")
+        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.75); background: transparent;")
+        title_col.addWidget(t)
+        title_col.addWidget(s)
+        banner_lay.addLayout(title_col)
+        banner_lay.addStretch()
+        lay.addWidget(banner)
+
+        # ── Body ────────────────────────────────
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(24, 24, 24, 24)
+        body_lay.setSpacing(16)
+        
+        # Name
+        name_sec = QVBoxLayout()
+        name_sec.setSpacing(8)
+        name_sec.addWidget(small_label("FULL NAME", color="#64748B", size=10, bold=True))
+        self.name_edit = QLineEdit(doctor['name'] if doctor else "")
+        self.name_edit.setPlaceholderText("e.g. Dr. John Doe")
+        self.name_edit.setStyleSheet(self._input_style())
+        name_sec.addWidget(self.name_edit)
+        body_lay.addLayout(name_sec)
+
+        # Type
+        type_sec = QVBoxLayout()
+        type_sec.setSpacing(8)
+        type_sec.addWidget(small_label("SIGNATORY TYPE", color="#64748B", size=10, bold=True))
+        
+        import tempfile, os
+        _arrow_path = os.path.join(tempfile.gettempdir(), "tdm_staff_arrow_down.png")
+        qta.icon("mdi6.chevron-down", color="#64748B").pixmap(14, 14).save(_arrow_path)
+        _arrow_path = _arrow_path.replace("\\", "/")
+        
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Doctor", "Technologist"])
-        self.type_combo.setStyleSheet(self._input_style())
+        self.type_combo.setStyleSheet(self._input_style(_arrow_path))
         if doctor and doctor.get('type'):
             self.type_combo.setCurrentText(doctor['type'].capitalize())
-        lay.addWidget(self.type_combo)
+        type_sec.addWidget(self.type_combo)
+        body_lay.addLayout(type_sec)
         
-        lay.addWidget(small_label("DESIGNATION / DEGREE (DESCRIPTION)"))
+        # Description
+        desc_sec = QVBoxLayout()
+        desc_sec.setSpacing(8)
+        desc_sec.addWidget(small_label("DESCRIPTION", color="#64748B", size=10, bold=True))
         self.desc_edit = QPlainTextEdit()
         self.desc_edit.setPlainText(doctor['designation'] if doctor else "")
-        self.desc_edit.setPlaceholderText("e.g.\nMBBS, BCS (Health)\nFCPS (Medicine)")
+        self.desc_edit.setPlaceholderText("e.g.\nDegrees, Department, or other info...")
         self.desc_edit.setStyleSheet(self._input_style())
-        self.desc_edit.setFixedHeight(120)
-        lay.addWidget(self.desc_edit)
+        self.desc_edit.setFixedHeight(100)
+        desc_sec.addWidget(self.desc_edit)
+        body_lay.addLayout(desc_sec)
+
+        # Phone Number
+        phone_sec = QVBoxLayout()
+        phone_sec.setSpacing(8)
+        phone_sec.addWidget(small_label("PHONE NUMBER", color="#64748B", size=10, bold=True))
+        self.phone_edit = QLineEdit(doctor.get('phone', '') if doctor else "")
+        self.phone_edit.setPlaceholderText("e.g. +880 1XXX-XXXXXX")
+        self.phone_edit.setStyleSheet(self._input_style())
+        phone_sec.addWidget(self.phone_edit)
+        body_lay.addLayout(phone_sec)
         
-        lay.addWidget(small_label("DIGITAL SIGNATURE"))
+        # Signature
+        sig_sec = QVBoxLayout()
+        sig_sec.setSpacing(12)
+        sig_sec.addWidget(small_label("DIGITAL SIGNATURE", color="#64748B", size=10, bold=True))
+        
+        sig_box = QFrame()
+        sig_box.setStyleSheet("background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 12px;")
+        sig_box_lay = QVBoxLayout(sig_box)
+        sig_box_lay.setContentsMargins(10, 10, 10, 10)
+        
         self.sig_label = QLabel()
-        self.sig_label.setFixedSize(200, 80)
+        self.sig_label.setFixedSize(220, 80)
         self.sig_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.sig_label.setStyleSheet("border: 1.5px dashed #CBD5E1; border-radius: 8px; background: #F8FAFC;")
+        self.sig_label.setStyleSheet("background: transparent; color: #94A3B8; font-size: 11px;")
         self.sig_path = doctor['signature_path'] if doctor else None
         self._update_sig_preview()
-        lay.addWidget(self.sig_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        sig_box_lay.addWidget(self.sig_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        sig_sec.addWidget(sig_box)
         
         upload_btn = QPushButton("Upload Signature Image")
         upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        upload_btn.setFixedHeight(38)
         upload_btn.setStyleSheet("""
             QPushButton {
                 background: #EFF6FF; color: #2563EB; border: 1.5px solid #BFDBFE;
@@ -2473,23 +2661,112 @@ class DoctorEditModal(QDialog):
             QPushButton:hover { background: #DBEAFE; }
         """)
         upload_btn.clicked.connect(self._upload_sig)
-        lay.addWidget(upload_btn)
+        sig_sec.addWidget(upload_btn)
+        body_lay.addLayout(sig_sec)
         
-        lay.addStretch()
+        body_lay.addSpacing(10)
         
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(self._save)
-        btns.rejected.connect(self.reject)
-        lay.addWidget(btns)
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
         
-    def _input_style(self):
-        return """
-            QLineEdit, QPlainTextEdit {
-                background: #F1F5F9; border: 1.5px solid #E2E8F0; border-radius: 10px;
-                padding: 10px 14px; font-size: 14px; color: #1E293B;
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(42)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEE2E2; color: #B91C1C;
+                border: 1.5px solid #FCA5A5; border-radius: 10px;
+                font-size: 13px; padding: 0 24px;
             }
-            QLineEdit:focus, QPlainTextEdit:focus { border-color: #3B82F6; background: white; }
+            QPushButton:hover {
+                background: #DC2626; color: white;
+                border: 1.5px solid #B91C1C;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        
+        save_btn = QPushButton("Save Details")
+        save_btn.setFixedHeight(42)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: #16A34A; color: white;
+                border: none; border-radius: 10px;
+                font-size: 13px; font-weight: bold; padding: 0 24px;
+            }
+            QPushButton:hover { background: #15803D; }
+        """)
+        save_btn.clicked.connect(self._save)
+        
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
+        body_lay.addLayout(btn_row)
+        
+        lay.addWidget(body)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_toast'):
+            width = self.width() - 48
+            self._toast.setFixedWidth(width)
+            self._toast.move(24, 24)
+
+    def _show_error(self, title, msg):
+        self._toast.show_message(title, msg, tone="warning")
+
+    def _input_style(self, arrow_path=None):
+        style = f"""
+            QLineEdit, QPlainTextEdit, QComboBox {{
+                background: #F7FAFE;
+                border: 1.5px solid {BORDER};
+                border-radius: 12px;
+                padding: 10px 14px;
+                font-size: 14px;
+                color: {TEXT_CLR};
+            }}
+            QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{
+                border-color: {BLUE};
+                background: white;
+            }}
+            QComboBox {{
+                padding-right: 40px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 34px;
+                border-top-right-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #64748B;
+                margin-top: 2px;
+            }}
         """
+        if arrow_path:
+            style += f"""
+                QComboBox::down-arrow {{
+                    image: url("{arrow_path}");
+                    width: 14px;
+                    height: 14px;
+                    border: none;
+                }}
+            """
+        
+        style += f"""
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 1px solid {BORDER};
+                selection-background-color: #EFF6FF;
+                selection-color: {BLUE};
+                outline: none;
+            }}
+        """
+        return style
         
     def _upload_sig(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Signature Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
@@ -2519,11 +2796,30 @@ class DoctorEditModal(QDialog):
         name = self.name_edit.text().strip()
         desc = self.desc_edit.toPlainText().strip()
         type_str = self.type_combo.currentText().lower()
+        phone = self.phone_edit.text().strip()
+        
         if not name:
-            QMessageBox.warning(self, "Required", "Name is required.")
+            self._show_error("Name Required", "Please enter signatory name.")
             return
+            
+        if not phone:
+            self._show_error("Phone Required", "Please enter phone number.")
+            return
+            
+        # Basic validation: ensure it has at least 11 digits
+        clean_phone = "".join(filter(str.isdigit, phone))
+        if len(clean_phone) < 11:
+            self._show_error("Invalid Phone", "Please enter a valid 11-digit phone number.")
+            return
+
+        # Uniqueness check
+        from database import is_doctor_phone_exists
+        if is_doctor_phone_exists(phone, exclude_id=self.doctor['id'] if self.doctor else None):
+            self._show_error("Duplicate Phone", "This phone number is already registered.")
+            return
+
         if self.doctor:
-            update_doctor(self.doctor['id'], name, desc, self.sig_path, type=type_str)
+            update_doctor(self.doctor['id'], name, desc, self.sig_path, type=type_str, phone=phone)
         else:
-            add_doctor(name, desc, self.sig_path, type=type_str)
+            add_doctor(name, desc, self.sig_path, type=type_str, phone=phone)
         self.accept()

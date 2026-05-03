@@ -443,6 +443,7 @@ class PatientRow(QFrame):
         if row_type == 'sample':
             text_cell(snapshot.get('patient', {}).get('pid', 'N/A'), stretch=4)
         text_cell(snapshot.get('patient', {}).get('name', 'N/A'), stretch=4)
+        text_cell(snapshot.get('patient', {}).get('phone', 'N/A'), stretch=3)
 
         drug = QLabel(snapshot.get('patient', {}).get('drug', 'N/A'))
         drug.setObjectName("drugBadge")
@@ -599,6 +600,7 @@ class PatientsListCard(Card):
         header_columns = [
             ("SL NO", 1, Qt.AlignmentFlag.AlignCenter),
             ("NAME", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("PHONE", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("DRUG", 2, Qt.AlignmentFlag.AlignCenter),
             ("COLLECTION DATE", 3, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("ACTIONS", 0, Qt.AlignmentFlag.AlignCenter),
@@ -783,51 +785,43 @@ class DoctorRow(QFrame):
         """)
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 0, 18, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(20, 10, 20, 10)
+        lay.setSpacing(10)
 
         # SL NO
         sl = QLabel(str(serial_no))
-        sl.setFixedWidth(35)
         sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sl.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: bold; background: transparent; border: none;")
-        lay.addWidget(sl)
+        lay.addWidget(sl, 1, Qt.AlignmentFlag.AlignCenter)
 
         # Name & Type
-        name_col = QVBoxLayout()
-        name_col.setSpacing(2)
-        name_col.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        name_wrap = QWidget()
+        name_wrap.setStyleSheet("background: transparent; border: none;")
+        name_lay = QVBoxLayout(name_wrap)
+        name_lay.setContentsMargins(0, 0, 0, 0)
+        name_lay.setSpacing(2)
         
         name_lbl = QLabel(doctor.get('name', 'N/A'))
         name_lbl.setStyleSheet(f"color: {TEXT_CLR}; font-size: 13.5px; font-weight: 700; background: transparent; border: none;")
-        name_col.addWidget(name_lbl)
+        name_lay.addWidget(name_lbl)
         
         type_str = doctor.get('type', 'doctor').upper()
-        type_bg = "#EDE9FE" if type_str == 'DOCTOR' else "#CCFBF1"
-        type_fg = "#6D28D9" if type_str == 'DOCTOR' else "#0F766E"
-        
         type_badge = QLabel(type_str)
         type_badge.setFixedWidth(90)
         type_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         type_badge.setStyleSheet(f"""
-            background: {type_bg}; color: {type_fg}; 
+            background: {"#EDE9FE" if type_str == 'DOCTOR' else "#CCFBF1"}; 
+            color: {"#6D28D9" if type_str == 'DOCTOR' else "#0F766E"}; 
             border-radius: 6px; font-size: 9px; font-weight: 800; padding: 2px 4px;
         """)
-        name_col.addWidget(type_badge)
-        lay.addLayout(name_col, 4)
+        name_lay.addWidget(type_badge)
+        lay.addWidget(name_wrap, 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        # Designation
-        desc_text = doctor.get('designation', 'No designation').strip()
-        # Truncate logic: first line only, max 40 chars
-        display_desc = desc_text.split("\n")[0] if desc_text else "No designation"
-        if len(display_desc) > 40:
-            display_desc = display_desc[:37] + "..."
-        elif "\n" in desc_text:
-            display_desc += "..."
-        
-        desc_lbl = QLabel(display_desc)
-        desc_lbl.setStyleSheet(f"color: {LABEL_CLR}; font-size: 12.5px; background: transparent; border: none;")
-        lay.addWidget(desc_lbl, 5)
+        # Phone
+        phone = (doctor.get('phone') or '').strip()
+        phone_lbl = QLabel(phone if phone else "N/A")
+        phone_lbl.setStyleSheet(f"color: {BLUE if phone else '#94A3B8'}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        lay.addWidget(phone_lbl, 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         # Actions
         actions = QHBoxLayout()
@@ -851,10 +845,11 @@ class DoctorRow(QFrame):
         
         actions_widget = QWidget()
         actions_widget.setFixedWidth(100)
+        actions_widget.setStyleSheet("background: transparent; border: none;")
         actions_widget_lay = QHBoxLayout(actions_widget)
         actions_widget_lay.setContentsMargins(0, 0, 0, 0)
         actions_widget_lay.addLayout(actions)
-        lay.addWidget(actions_widget)
+        lay.addWidget(actions_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
 
 class DoctorsListCard(Card):
@@ -956,7 +951,7 @@ class DoctorsListCard(Card):
         header_columns = [
             ("SL NO", 1, Qt.AlignmentFlag.AlignCenter),
             ("NAME & TYPE", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            ("DESIGNATION / DESCRIPTION", 5, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("PHONE", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("ACTIONS", 0, Qt.AlignmentFlag.AlignCenter),
         ]
         for text, stretch, alignment in header_columns:

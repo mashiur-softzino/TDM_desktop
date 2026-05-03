@@ -82,7 +82,7 @@ QLineEdit:focus {{
     border: 1.5px solid {BLUE};
 }}
 QLineEdit::placeholder {{
-    color: #BDBDBD;
+    color: rgba(0, 0, 0, 0.22);
 }}
 QTableWidget {{
     background: white;

@@ -236,7 +236,8 @@ def init_db():
                 dept           TEXT,
                 diagnosis      TEXT,
                 tx_date        TEXT,
-                delivery_date TEXT
+                delivery_date  TEXT,
+                phone          TEXT
             );
 
             CREATE TABLE IF NOT EXISTS doctors (
@@ -244,7 +245,8 @@ def init_db():
                 name           TEXT NOT NULL,
                 designation    TEXT,
                 signature_path TEXT,
-                type           TEXT NOT NULL DEFAULT 'doctor'
+                type           TEXT NOT NULL DEFAULT 'doctor',
+                phone          TEXT
             );
 
             CREATE TABLE IF NOT EXISTS records (
@@ -326,12 +328,15 @@ def init_db():
                 co_medications         TEXT,
                 scheme                 INTEGER,
                 trough                 TEXT,
+                phone                  TEXT,
                 prepared_by_id         INTEGER REFERENCES doctors(id),
                 checked_by_id          INTEGER REFERENCES doctors(id)
             );
         """)
         if not _column_exists(conn, "doctors", "type"):
             conn.execute("ALTER TABLE doctors ADD COLUMN type TEXT NOT NULL DEFAULT 'doctor'")
+        if not _column_exists(conn, "doctors", "phone"):
+            conn.execute("ALTER TABLE doctors ADD COLUMN phone TEXT")
 
         # Migrations for patients
         if not _column_exists(conn, 'patients', 'pid'):
@@ -409,6 +414,11 @@ def init_db():
         if not _column_exists(conn, 'pk_results', 'lss_equation'):
             conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
 
+        if not _column_exists(conn, 'patients', 'phone'):
+            conn.execute("ALTER TABLE patients ADD COLUMN phone TEXT")
+        if not _column_exists(conn, 'drafts', 'phone'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN phone TEXT")
+
         conn.commit()
         _migrate_legacy_drafts(conn)
 
@@ -443,7 +453,7 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
             conn.execute(
                 """UPDATE patients
                    SET name = ?, age = ?, sex = ?, invoice_date = ?, report_number = ?, dept = ?,
-                       diagnosis = ?, tx_date = ?, delivery_date = ?
+                       diagnosis = ?, tx_date = ?, delivery_date = ?, phone = ?
                    WHERE id = ?""",
                 (
                     patient.get('name'),
@@ -455,6 +465,7 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
                     patient.get('diag'),
                     patient.get('tx_date'),
                     patient.get('delivery_date'),
+                    patient.get('phone'),
                     row['id'],
                 )
             )
@@ -462,8 +473,8 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
 
     pid = _generate_pid()
     cursor = conn.execute(
-        """INSERT INTO patients (pid, invoice_number, name, age, sex, invoice_date, report_number, dept, diagnosis, tx_date, delivery_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO patients (pid, invoice_number, name, age, sex, invoice_date, report_number, dept, diagnosis, tx_date, delivery_date, phone)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             pid,
             invoice_no if invoice_no and invoice_no != 'N/A' else None,
@@ -476,6 +487,7 @@ def _get_or_create_patient(conn: sqlite3.Connection, patient: dict) -> int:
             patient.get('diag'),
             patient.get('tx_date'),
             patient.get('delivery_date'),
+            patient.get('phone'),
         )
     )
     return cursor.lastrowid
@@ -504,6 +516,7 @@ def _row_to_snapshot(record: sqlite3.Row, points: list, pk_row) -> dict:
         'tx_date':                record['tx_date']                or '',
         'delivery_date':          record['delivery_date']          or '',
         'med':                    record['co_medications']         or 'N/A',
+        'phone':                  record['phone']                  or 'N/A',
     }
 
     snapshot = {
@@ -568,6 +581,7 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
         'tx_date':                row['tx_date']                or '',
         'delivery_date':          row['delivery_date']          or '',
         'med':                    row['co_medications']         or 'N/A',
+        'phone':                  row['phone']                  or 'N/A',
     }
 
     snapshot = {
@@ -613,8 +627,8 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
         """INSERT OR REPLACE INTO drafts
            (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
             name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
-            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             snapshot['id'],
             snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
@@ -641,6 +655,7 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
             patient.get('med'),
             snapshot.get('scheme'),
             snapshot.get('trough'),
+            patient.get('phone'),
             snapshot.get('prepared_by_id'),
             snapshot.get('checked_by_id'),
         )
@@ -801,7 +816,7 @@ def load_all() -> tuple[list, list]:
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
                    r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
-                   p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date
+                    p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date, p.phone
             FROM   records r
             LEFT JOIN patients p ON r.patient_id = p.id
             ORDER  BY r.saved_at ASC, r.id ASC
@@ -826,7 +841,7 @@ def load_all() -> tuple[list, list]:
         draft_rows = conn.execute("""
             SELECT id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
                    name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
-                   drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id
+                    drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
             FROM drafts
             ORDER BY saved_at ASC, id ASC
         """).fetchall()
@@ -900,15 +915,28 @@ def get_doctor_by_id(doctor_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def add_doctor(name: str, designation: str, signature_path: str = None, type: str = 'doctor') -> int:
+def is_doctor_phone_exists(phone: str, exclude_id: int = None) -> bool:
+    if not phone: return False
     with _connect() as conn:
-        cur = conn.execute("INSERT INTO doctors (name, designation, signature_path, type) VALUES (?, ?, ?, ?)", (name, designation, signature_path, type))
+        if exclude_id:
+            row = conn.execute("SELECT 1 FROM doctors WHERE phone = ? AND id != ?", (phone, exclude_id)).fetchone()
+        else:
+            row = conn.execute("SELECT 1 FROM doctors WHERE phone = ?", (phone,)).fetchone()
+        return row is not None
+
+
+def add_doctor(name: str, designation: str, signature_path: str = None, type: str = 'doctor', phone: str = None) -> int:
+    with _connect() as conn:
+        cur = conn.execute("INSERT INTO doctors (name, designation, signature_path, type, phone) VALUES (?, ?, ?, ?, ?)", (name, designation, signature_path, type, phone))
         return cur.lastrowid
 
 
-def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None, type: str = 'doctor'):
+def update_doctor(doctor_id: int, name: str, designation: str, signature_path: str = None, type: str = 'doctor', phone: str = None):
     with _connect() as conn:
-        conn.execute("UPDATE doctors SET name = ?, designation = ?, signature_path = ?, type = ? WHERE id = ?", (name, designation, signature_path, type, doctor_id))
+        conn.execute(
+            "UPDATE doctors SET name = ?, designation = ?, signature_path = ?, type = ?, phone = ? WHERE id = ?",
+            (name, designation, signature_path, type, phone, doctor_id)
+        )
 
 
 def delete_doctor(doctor_id: int):
