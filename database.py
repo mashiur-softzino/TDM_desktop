@@ -904,7 +904,7 @@ def delete_medication(name: str):
 
 def load_doctors() -> list[dict]:
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM doctors ORDER BY LOWER(name) ASC").fetchall()
+        rows = conn.execute("SELECT * FROM doctors ORDER BY id DESC").fetchall()
         return [dict(row) for row in rows]
 
 

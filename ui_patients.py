@@ -854,9 +854,11 @@ class DoctorRow(QFrame):
 
 class DoctorsListCard(Card):
     search_changed = pyqtSignal(str)
+    page_changed = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__("Signatory List", "mdi6.account-group-outline", icon_color="#7C3AED", parent=parent)
+        self._page_index = 0
         self.setGraphicsEffect(None)
         
         self._count_badge = QLabel("0")
@@ -973,6 +975,27 @@ class DoctorsListCard(Card):
         self._rows_lay.setContentsMargins(0, 0, 0, 0)
         self._rows_lay.setSpacing(6)
         self._table_lay.addWidget(self._rows_host)
+
+        self._pagination = QFrame()
+        self._pagination.setObjectName("paginationDoc")
+        self._pagination.setStyleSheet(f"""
+            QFrame#paginationDoc {{
+                background: white;
+                border: 1px solid #E2E8F0;
+                border-radius: 14px;
+            }}
+            QLabel#pageInfoDoc {{
+                color: {LABEL_CLR};
+                font-size: 12px;
+                font-weight: 600;
+                background: transparent;
+                border: none;
+            }}
+        """)
+        self._pagination_lay = QHBoxLayout(self._pagination)
+        self._pagination_lay.setContentsMargins(12, 8, 12, 8)
+        self._pagination_lay.setSpacing(8)
+        self._table_lay.addWidget(self._pagination)
         self._table_lay.addStretch()
 
         self.body().addWidget(self._empty)
@@ -980,6 +1003,85 @@ class DoctorsListCard(Card):
 
     def search_text(self):
         return self._search_edit.text().strip().lower()
+
+    def page_index(self) -> int:
+        return self._page_index
+
+    def set_page_index(self, page_index: int):
+        self._page_index = max(0, page_index)
+        self.page_changed.emit()
+
+    def clamp_page_index(self, page_count: int):
+        max_index = max(0, page_count - 1)
+        if self._page_index > max_index:
+            self._page_index = max_index
+
+    def set_pagination(self, page_index: int, page_count: int, total_count: int, page_size: int):
+        while self._pagination_lay.count():
+            item = self._pagination_lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if page_count <= 1:
+            self._pagination.hide()
+            return
+
+        self._pagination.show()
+        first_item = page_index * page_size + 1
+        last_item = min(total_count, first_item + page_size - 1)
+        info = QLabel(f"{first_item}-{last_item} of {total_count}")
+        info.setObjectName("pageInfoDoc")
+        self._pagination_lay.addWidget(info)
+        self._pagination_lay.addStretch()
+
+        def make_btn(label, target=None, active=False, enabled=True, icon_name=None):
+            btn = QPushButton(label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor if enabled and not active else Qt.CursorShape.ArrowCursor)
+            btn.setEnabled(enabled)
+            btn.setFixedHeight(30)
+            btn.setMinimumWidth(32)
+            if icon_name:
+                btn.setIcon(qta.icon(icon_name, color="#64748B" if enabled else "#CBD5E1"))
+            if active:
+                style = f"background: {BLUE}; color: white; border: 1px solid {BLUE};"
+            else:
+                style = "background: #F8FAFC; color: #334155; border: 1px solid #D8E2EF;"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    {style}
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: 700;
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: #E8F0FE;
+                    color: {BLUE};
+                    border: 1px solid #BBD3FF;
+                }}
+                QPushButton:disabled {{
+                    background: #F1F5F9;
+                    color: #94A3B8;
+                    border: 1px solid #E2E8F0;
+                }}
+            """)
+            if target is not None and not active:
+                btn.clicked.connect(lambda: self.set_page_index(target))
+            return btn
+
+        self._pagination_lay.addWidget(make_btn("", page_index - 1, enabled=page_index > 0, icon_name="mdi6.chevron-left"))
+
+        pages = []
+        if page_count <= 5:
+            pages = list(range(page_count))
+        else:
+            start = max(0, min(page_index - 2, page_count - 5))
+            pages = list(range(start, start + 5))
+        for page in pages:
+            self._pagination_lay.addWidget(make_btn(str(page + 1), page, active=(page == page_index)))
+
+        self._pagination_lay.addWidget(make_btn("", page_index + 1, enabled=page_index < page_count - 1, icon_name="mdi6.chevron-right"))
 
     def set_count(self, count):
         self._count_badge.setText(str(count))
@@ -990,6 +1092,8 @@ class DoctorsListCard(Card):
     def set_empty_visible(self, visible):
         self._empty.setVisible(visible)
         self._table.setVisible(not visible)
+        if visible:
+            self._pagination.hide()
 
     def clear_rows(self):
         while self._rows_lay.count():

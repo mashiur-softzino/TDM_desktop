@@ -318,16 +318,23 @@ class TDMMainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(20)
         self.doctor_list_card = DoctorsListCard()
-        self.doctor_list_card.search_changed.connect(lambda _: self._refresh_doctors_list())
+        self.doctor_list_card.search_changed.connect(self._on_doctor_search_changed)
+        self.doctor_list_card.page_changed.connect(lambda: self._refresh_doctors_list())
         self.doctor_list_card._add_btn.clicked.connect(self._add_doctor_from_list)
         lay.addWidget(self.doctor_list_card)
         return page
+
+    def _on_doctor_search_changed(self, _):
+        self.doctor_list_card._page_index = 0
+        self._refresh_doctors_list()
 
     def _add_doctor_from_list(self):
         dlg = DoctorEditModal(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._refresh_doctors_list()
             self._refresh_doctor_combos()
+
+    _DOC_PAGE_SIZE = 10
 
     def _refresh_doctors_list(self):
         if not hasattr(self, 'doctor_list_card'): return
@@ -344,11 +351,21 @@ class TDMMainWindow(QMainWindow):
             return
             
         self.doctor_list_card.set_empty_visible(False)
-        for i, doc in enumerate(reversed(filtered), 1):
+        
+        visible = filtered
+        page_count = max(1, (len(visible) + self._DOC_PAGE_SIZE - 1) // self._DOC_PAGE_SIZE)
+        self.doctor_list_card.clamp_page_index(page_count)
+        page_index = self.doctor_list_card.page_index()
+        start = page_index * self._DOC_PAGE_SIZE
+        page_items = visible[start:start + self._DOC_PAGE_SIZE]
+        
+        for i, doc in enumerate(page_items, start + 1):
             row = DoctorRow(doc, serial_no=i)
             row.edit_requested.connect(self._edit_doctor_from_list)
             row.delete_requested.connect(self._delete_doctor_from_list)
             self.doctor_list_card.add_row(row)
+        
+        self.doctor_list_card.set_pagination(page_index, page_count, len(visible), self._DOC_PAGE_SIZE)
 
     def _edit_doctor_from_list(self, doctor):
         dlg = DoctorEditModal(doctor, parent=self)
@@ -1828,6 +1845,12 @@ class TDMMainWindow(QMainWindow):
             self.draft_list_card.set_count(len(self._drafts))
 
     def _save_draft(self):
+        phone = self.f_phone.text().strip()
+        if phone:
+            clean_phone = "".join(filter(str.isdigit, phone))
+            if len(clean_phone) < 11:
+                self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
+                return
         snapshot = self._snapshot_payload()
         snapshot.pop('pk', None)
         snapshot.pop('interp', None)
@@ -2145,6 +2168,14 @@ class TDMMainWindow(QMainWindow):
     # Calculate
     # ──────────────────────────────────────
     def _calculate(self):
+        # Phone validation
+        phone = self.f_phone.text().strip()
+        if phone:
+            clean_phone = "".join(filter(str.isdigit, phone))
+            if len(clean_phone) < 11:
+                self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
+                return
+
         if hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
 
