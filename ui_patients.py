@@ -882,7 +882,7 @@ class DoctorsListCard(Card):
         )
 
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Search by name...")
+        self._search_edit.setPlaceholderText("Search by name or phone number")
         self._search_edit.setStyleSheet(f"""
             QLineEdit {{
                 background: transparent;

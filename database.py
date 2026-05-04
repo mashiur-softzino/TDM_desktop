@@ -623,6 +623,8 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
 
 def _save_draft(conn: sqlite3.Connection, snapshot: dict):
     patient = snapshot.get('patient', {})
+    prepared_by_id = snapshot.get('prepared_by_id') or None
+    checked_by_id = snapshot.get('checked_by_id') or None
     conn.execute(
         """INSERT OR REPLACE INTO drafts
            (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
@@ -656,8 +658,8 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
             snapshot.get('scheme'),
             snapshot.get('trough'),
             patient.get('phone'),
-            snapshot.get('prepared_by_id'),
-            snapshot.get('checked_by_id'),
+            prepared_by_id,
+            checked_by_id,
         )
     )
 
@@ -734,6 +736,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
         return
 
     patient = snapshot.get('patient', {})
+    prepared_by_id = snapshot.get('prepared_by_id') or None
+    checked_by_id = snapshot.get('checked_by_id') or None
 
     with _connect() as conn:
         patient_id = _get_or_create_patient(conn, patient)
@@ -760,8 +764,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                 patient.get('med'),
                 snapshot.get('scheme'),
                 snapshot.get('trough'),
-                snapshot.get('prepared_by_id'),
-                snapshot.get('checked_by_id'),
+                prepared_by_id,
+                checked_by_id,
             )
         )
 

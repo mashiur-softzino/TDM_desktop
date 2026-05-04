@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('SOFTZINO_LOGO.png', '.'), ('cal_icon.png', '.')],
+    datas=[('softzino.png', '.'), ('cal_icon.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -1,5 +1,5 @@
 """
-TDM Report — Therapeutic Drug Monitoring Software
+TDM Report - Therapeutic Drug Monitoring Software
 Entry point
 """
 
@@ -7,13 +7,15 @@ import os
 import sys
 import faulthandler
 from datetime import datetime
+
 if sys.stderr is not None:
     faulthandler.enable()
-os.environ.setdefault('QT_MAC_WANTS_LAYER', '1')
+os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
+
 from app_logger import log_startup, log_shutdown, log_license_activated, log_license_expired
 
 
@@ -21,41 +23,45 @@ def _make_splash(app: QApplication) -> QSplashScreen:
     screen = app.primaryScreen()
     dpr = screen.devicePixelRatio() if screen else 1.0
 
-    w, h = 420, 220
+    w, h = 520, 280
     px = QPixmap(int(w * dpr), int(h * dpr))
     px.setDevicePixelRatio(dpr)
-    px.fill(QColor("#0D2B6B"))
+    px.fill(QColor("#0A234F"))
 
     painter = QPainter(px)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.fillRect(0, 0, w, h, QColor("#0A234F"))
+    painter.setBrush(QColor("#123B7A"))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(-45, -15, 250, 180)
+    painter.drawEllipse(330, 150, 210, 140)
+    painter.setBrush(QColor(255, 255, 255, 18))
+    painter.drawRoundedRect(24, 22, w - 48, h - 44, 26, 26)
 
-    # Logo image (top-centre) — sys._MEIPASS used when running as PyInstaller EXE
-    _base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-    logo_path = os.path.join(_base, "SOFTZINO_LOGO.png")
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    logo_path = os.path.join(base_path, "softzino.png")
     logo = QPixmap(logo_path)
+    if logo.isNull():
+        logo = QPixmap(os.path.join(base_path, "SOFTZINO_LOGO.png"))
     if not logo.isNull():
-        logo = logo.scaledToHeight(48, Qt.TransformationMode.SmoothTransformation)
-        lx = (w - logo.width()) // 2
-        painter.drawPixmap(lx, 30, logo)
+        logo = logo.scaledToHeight(60, Qt.TransformationMode.SmoothTransformation)
+        logo_x = (w - logo.width()) // 2
+        painter.drawPixmap(logo_x, 40, logo)
 
-    # App name
-    font = QFont("Arial", 16, QFont.Weight.Bold)
-    painter.setFont(font)
+    title_font = QFont("Arial", 18, QFont.Weight.Bold)
+    painter.setFont(title_font)
     painter.setPen(QColor("#FFFFFF"))
-    painter.drawText(0, 105, w, 28, Qt.AlignmentFlag.AlignHCenter, "TDM Report")
+    painter.drawText(0, 122, w, 36, Qt.AlignmentFlag.AlignHCenter, "TDM Report")
 
-    # Subtitle
-    font2 = QFont("Arial", 10)
-    painter.setFont(font2)
-    painter.setPen(QColor("#A0B4D0"))
-    painter.drawText(0, 135, w, 20, Qt.AlignmentFlag.AlignHCenter,
-                     "Therapeutic Drug Monitoring")
+    subtitle_font = QFont("Arial", 11)
+    painter.setFont(subtitle_font)
+    painter.setPen(QColor("#C8D8F2"))
+    painter.drawText(0, 158, w, 24, Qt.AlignmentFlag.AlignHCenter, "Therapeutic Drug Monitoring")
 
-    # Loading text
-    font3 = QFont("Arial", 9)
-    painter.setFont(font3)
-    painter.setPen(QColor("#6B8BAF"))
-    painter.drawText(0, 185, w, 20, Qt.AlignmentFlag.AlignHCenter, "Loading, please wait…")
+    loading_font = QFont("Arial", 10)
+    painter.setFont(loading_font)
+    painter.setPen(QColor("#9DB7DD"))
+    painter.drawText(0, 226, w, 24, Qt.AlignmentFlag.AlignHCenter, "Loading, please wait...")
 
     painter.end()
 
@@ -67,12 +73,12 @@ def _make_splash(app: QApplication) -> QSplashScreen:
 def main():
     app = QApplication(sys.argv)
 
-    # ── License check ──────────────────────────────
     from license_manager import LicenseManager
-    lm = LicenseManager()
 
+    lm = LicenseManager()
     if not lm.is_licensed():
         from activation_window import ActivationWindow
+
         win = ActivationWindow(lm)
         if win.exec() != ActivationWindow.DialogCode.Accepted:
             sys.exit(0)
@@ -81,16 +87,14 @@ def main():
     log_startup()
     info = lm.license_info()
     log_license_activated(info.get("license_key", ""), info.get("expires_at_local", ""))
-    # ───────────────────────────────────────────────
 
-    # Show splash while heavy modules (matplotlib, scipy, numpy) load
     splash = _make_splash(app)
     splash.show()
     app.processEvents()
 
-    # Import deferred until after splash is visible — all heavy libraries load here
     from tdm_report import TDMMainWindow, STYLE
     from database import create_database_backup
+
     app.setStyleSheet(STYLE)
 
     window = TDMMainWindow()
@@ -134,10 +138,8 @@ def main():
             0,
             int((expires_at - datetime.now().astimezone()).total_seconds() * 1000),
         )
-        # QTimer uses a 32-bit int (max ~24.8 days). For longer licenses,
-        # skip the precise timer — expiry_timer (5-second polling) handles it.
-        MAX_QTIMER_MS = 2_147_483_647
-        if remaining_ms <= MAX_QTIMER_MS:
+        max_qtimer_ms = 2_147_483_647
+        if remaining_ms <= max_qtimer_ms:
             precise_expiry_timer.start(remaining_ms)
 
     precise_expiry_timer.timeout.connect(handle_runtime_expiry)
@@ -166,5 +168,5 @@ def main():
     sys.exit(app.exec())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

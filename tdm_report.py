@@ -29,7 +29,7 @@ from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
 from ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
                         ToastMessage, ConfirmActionModal)
-from ui_sampling import ModernSampleTable, MedicationSelector, DrugSelector
+from ui_sampling import ModernSampleTable, MedicationSelector
 from ui_patients import ResultsDialog, PatientRow, PatientsListCard, DoctorRow, DoctorsListCard
 
 from PyQt6.QtWidgets import (
@@ -341,7 +341,7 @@ class TDMMainWindow(QMainWindow):
         self.doctor_list_card.clear_rows()
         doctors = load_doctors()
         query = self.doctor_list_card.search_text()
-        filtered = [d for d in doctors if query in d['name'].lower() or query in (d.get('designation') or '').lower() or query in (d.get('phone') or '').lower()]
+        filtered = [d for d in doctors if query in d['name'].lower() or query in (d.get('phone') or '').lower()]
         
         self.doctor_list_card.set_count(len(filtered))
         
@@ -377,9 +377,8 @@ class TDMMainWindow(QMainWindow):
         dlg = ConfirmActionModal(
             "Delete Signatory",
             f"Are you sure you want to delete \"{doctor['name']}\" from the Signatory List?",
-            confirm_label="Yes, Delete",
-            cancel_label="Cancel",
-            cancel_tone="danger",
+            confirm_label="Yes",
+            cancel_label="No",
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -778,7 +777,8 @@ class TDMMainWindow(QMainWindow):
         self.f_diag    = field("e.g. Post Renal Transplant")
         self.f_diag.setText("Post Renal Transplant")
         self.f_phone   = field("Enter phone number")
-        self.f_phone.setMaxLength(15)
+        self.f_phone.setMaxLength(11)
+        self.f_phone.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self.f_phone))
         for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by, self.f_diag, self.f_phone]:
             edit.textChanged.connect(self._on_data_changed)
 
@@ -989,8 +989,9 @@ class TDMMainWindow(QMainWindow):
         meta_grid.setSpacing(14)
         meta_grid.setHorizontalSpacing(18)
 
-        self.f_drug = DrugSelector()
-        self.f_drug.currentTextChanged.connect(self._on_data_changed)
+        self.f_drug = field("")
+        self.f_drug.setText("MPA")
+        self.f_drug.setReadOnly(True)
 
         self.f_preparation = field("e.g. Mycept-5")
         self.f_preparation.setText("Mycophenolate Mofetil")
@@ -1000,6 +1001,7 @@ class TDMMainWindow(QMainWindow):
             edit.textChanged.connect(self._on_data_changed)
         self.f_dose_dt = SmartDateTimeEdit()
         self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._on_data_changed())
+        self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._update_action_buttons())
         self.f_sample_collection_date = SmartDateEdit(initial_date=QDate.currentDate())
         self.f_sample_collection_date.dateChanged.connect(lambda *_: self._on_data_changed())
         self.f_sample_collection_date.dateChanged.connect(self._update_tx_duration)
@@ -1451,6 +1453,7 @@ class TDMMainWindow(QMainWindow):
         prep_col.addWidget(small_label("PREPARED BY"))
         self.prep_by_combo = QComboBox()
         self.prep_by_combo.setStyleSheet(combo_style)
+        self.prep_by_combo.currentIndexChanged.connect(lambda *_: self._on_data_changed())
         prep_col.addWidget(self.prep_by_combo)
         row.addLayout(prep_col, 1)
         
@@ -1460,6 +1463,7 @@ class TDMMainWindow(QMainWindow):
         check_col.addWidget(small_label("CHECKED BY / APPROVED BY"))
         self.checked_by_combo = QComboBox()
         self.checked_by_combo.setStyleSheet(combo_style)
+        self.checked_by_combo.currentIndexChanged.connect(lambda *_: self._on_data_changed())
         check_col.addWidget(self.checked_by_combo)
         row.addLayout(check_col, 1)
         
@@ -1613,7 +1617,7 @@ class TDMMainWindow(QMainWindow):
             'report_number': self.f_report_no.text().strip() or 'N/A',
             'dept': self.f_referred_by.text().strip() or 'N/A',
             'delivery_date': d_del.toString("dd.MM.yyyy") if d_del else 'N/A',
-            'drug': self.f_drug.currentText().strip(),
+            'drug': self.f_drug.text().strip(),
             'preparation': self.f_preparation.text().strip(),
             'dose': self.f_dose.text().strip(),
             'dose_dt': self.f_dose_dt.dateTime().toString("dd.MM.yyyy 'at' hh:mmAP"),
@@ -1633,6 +1637,8 @@ class TDMMainWindow(QMainWindow):
             'duration_options': list(getattr(self, '_duration_options', DEFAULT_DURATION_OPTIONS)),
             'trough': self.trough_edit.text().strip(),
             'sample_rows': self.sample_table.get_rows_payload(),
+            'prepared_by_id': self.prep_by_combo.currentData() if hasattr(self, 'prep_by_combo') else None,
+            'checked_by_id': self.checked_by_combo.currentData() if hasattr(self, 'checked_by_combo') else None,
         }
 
     def _snapshot_payload(self):
@@ -1677,7 +1683,7 @@ class TDMMainWindow(QMainWindow):
             except (ValueError, AttributeError):
                 return False
         return all([
-            self.f_drug.currentText().strip(),
+            self.f_drug.text().strip(),
             self.f_preparation.text().strip(),
             self.f_dose.text().strip(),
         ])
@@ -1856,8 +1862,7 @@ class TDMMainWindow(QMainWindow):
     def _save_draft(self):
         phone = self.f_phone.text().strip()
         if phone:
-            clean_phone = "".join(filter(str.isdigit, phone))
-            if len(clean_phone) < 11:
+            if not phone.isdigit() or len(phone) != 11:
                 self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
                 return
         snapshot = self._snapshot_payload()
@@ -1941,7 +1946,7 @@ class TDMMainWindow(QMainWindow):
         sex_index = self.f_sex.findText(sex_value) if sex_value else 0
         self.f_sex.setCurrentIndex(sex_index if sex_index >= 0 else 0)
         self.f_diag.setText(patient.get('diag', 'Post Renal Transplant') if patient.get('diag') != 'N/A' else 'Post Renal Transplant')
-        self.f_drug.setCurrentText(patient.get('drug', 'MPA'))
+        self.f_drug.setText(patient.get('drug', 'MPA') or 'MPA')
         self.f_preparation.setText(patient.get('preparation', 'Mycophenolate Mofetil (MMF)'))
         self.f_dose.setText(patient.get('dose', '540mg - 720mg') if patient.get('dose') != 'N/A' else '')
         tx_date = QDate.fromString(patient.get('tx_date', ''), "dd.MM.yyyy")
@@ -2180,15 +2185,14 @@ class TDMMainWindow(QMainWindow):
         # Phone validation
         phone = self.f_phone.text().strip()
         if phone:
-            clean_phone = "".join(filter(str.isdigit, phone))
-            if len(clean_phone) < 11:
+            if not phone.isdigit() or len(phone) != 11:
                 self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
                 return
 
         if hasattr(self, '_report_snapshot'):
             delattr(self, '_report_snapshot')
 
-        drug = canonical_drug_name(self.f_drug.currentText().strip() or 'MPA')
+        drug = canonical_drug_name(self.f_drug.text().strip() or 'MPA')
 
         # ── Direct AUC mode ───────────────────────────────────────────
         if getattr(self, '_sampling_mode', 'multi') == 'direct':
@@ -2364,7 +2368,7 @@ class TDMMainWindow(QMainWindow):
                      self.f_dose,
                      self.f_diag, self.trough_edit, self.f_phone]:
             edit.clear()
-        self.f_drug.setCurrentIndex(0)
+        self.f_drug.setText("MPA")
         self.f_preparation.setText("Mycophenolate Mofetil (MMF)")
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
@@ -2568,9 +2572,17 @@ class DoctorManagementModal(QDialog):
         item = self.list_widget.currentItem()
         if not item: return
         doctor = item.data(Qt.ItemDataRole.UserRole)
-        if QMessageBox.question(self, "Delete Signatory", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
-            delete_doctor(doctor['id'])
-            self._refresh_list()
+        dlg = ConfirmActionModal(
+            "Delete Signatory",
+            f"Are you sure you want to delete \"{doctor['name']}\" from the Signatory List?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        delete_doctor(doctor['id'])
+        self._refresh_list()
 
 from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
@@ -2690,7 +2702,9 @@ class DoctorEditModal(QDialog):
         phone_sec.addLayout(phone_label)
         
         self.phone_edit = QLineEdit(doctor.get('phone', '') if doctor else "")
-        self.phone_edit.setPlaceholderText("e.g. +880 1XXX-XXXXXX")
+        self.phone_edit.setPlaceholderText("e.g. 01XXXXXXXXX")
+        self.phone_edit.setMaxLength(11)
+        self.phone_edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self.phone_edit))
         self.phone_edit.setStyleSheet(self._input_style())
         phone_sec.addWidget(self.phone_edit)
         phone_sec.addStretch() # Push to top
@@ -2879,9 +2893,7 @@ class DoctorEditModal(QDialog):
             self._show_error("Phone Required", "Please enter phone number.")
             return
             
-        # Basic validation: ensure it has at least 11 digits
-        clean_phone = "".join(filter(str.isdigit, phone))
-        if len(clean_phone) < 11:
+        if not phone.isdigit() or len(phone) != 11:
             self._show_error("Invalid Phone", "Please enter a valid 11-digit phone number.")
             return
 
