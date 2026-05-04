@@ -2259,15 +2259,22 @@ class TDMMainWindow(QMainWindow):
             return
         pk = calculate_auc_full(times, concs)
 
-        # LSS estimate — only show when drug-specific equation matches (not generic ANY)
-        lss = calculate_lss_auc(times, concs, cni=drug)
+        # LSS estimate — only use when EXACTLY 3 time points are provided
+        # and they match the LSS equation requirements (C₀, C₀.₅, C₂).
+        # When more points are available, trapezoidal AUC is more accurate.
+        lss = None
+        if len(times) == 3:
+            rounded_times = set(round(t, 1) for t in times)
+            if rounded_times == {0.0, 0.5, 2.0}:
+                lss = calculate_lss_auc(times, concs, cni=drug)
+        
         if lss and drug.upper() in lss['equation_label'].upper():
             pk['auc_lss']       = lss['auc_lss']
             pk['lss_equation']  = lss['equation_label']
             pk['lss_r2']        = lss['r2']
 
-        # Interpretation — use auc_lss when available (validated equation),
-        # fall back to auc_0_12 (trapezoidal extrapolation) otherwise.
+        # Interpretation — use auc_lss when available (exactly 3-point LSS),
+        # fall back to auc_0_12 (trapezoidal extrapolation) for all other cases.
         interp_value = pk.get('auc_lss') if pk.get('auc_lss') is not None else pk['auc_0_12']
         interp, _ = interpret_result(drug, interp_value)
         self._last_pk = pk
