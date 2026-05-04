@@ -2093,7 +2093,7 @@ class TDMMainWindow(QMainWindow):
                 concs=snapshot.get('concs', []),
                 prepared_by=prepared_by,
                 checked_by=checked_by,
-                graph_uri=self._graph_uri_for_snapshot(snapshot) if snapshot.get('times') else None
+                graph_uri=None # report_print will generate it from data
             )
             # Re-determine path if it was empty
             if not report_path:

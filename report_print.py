@@ -281,8 +281,9 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
 
     # Signature Section
     sig_html = '<div class="signature-container">'
-    for label, doctor in [("Prepared By", prepared_by), ("Checked By", checked_by)]:
-        sig_html += '<div class="sig-box">'
+    for i, (label, doctor) in enumerate([("Prepared By", prepared_by), ("Checked By", checked_by)]):
+        box_class = "sig-box sig-box-right" if i == 1 else "sig-box"
+        sig_html += f'<div class="{box_class}">'
         if doctor:
             sig_b64 = img_to_base64(doctor.get('signature_path'))
             if sig_b64:
@@ -325,8 +326,8 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .section-block {{ margin-top:10px; }}
     .meta-grid {{ display:flex; flex-direction:column; gap:3px; }}
     .grid-pair {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }}
-    .grid-row, .single-row {{ display:flex; gap:5px; align-items:flex-start; line-height:1.22; font-size:15px; }}
-    .grid-label {{ min-width:150px; font-weight:700; white-space:nowrap; }}
+    .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.22; font-size:15px; }}
+    .grid-label {{ width:auto; font-weight:700; white-space:nowrap; }}
     .grid-value {{ flex:1; }}
     .single-row {{ margin-top:6px; }}
     .full-row .grid-value {{ white-space: nowrap; }}
@@ -344,6 +345,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     
     .signature-container {{ margin-top:30px; display:flex; justify-content:space-between; padding:0 10px; }}
     .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
+    .sig-box-right {{ text-align:right; align-items:flex-end; }}
     .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
     .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
     .doc-name {{ font-weight:700; font-size:16px; margin-bottom:2px; color:#000; line-height:1.2; }}
