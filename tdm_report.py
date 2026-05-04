@@ -374,11 +374,20 @@ class TDMMainWindow(QMainWindow):
             self._refresh_doctor_combos()
 
     def _delete_doctor_from_list(self, doctor):
-        if QMessageBox.question(self, "Delete Signatory", f"Are you sure you want to delete {doctor['name']}?") == QMessageBox.StandardButton.Yes:
-            from database import delete_doctor
-            delete_doctor(doctor['id'])
-            self._refresh_doctors_list()
-            self._refresh_doctor_combos()
+        dlg = ConfirmActionModal(
+            "Delete Signatory",
+            f"Are you sure you want to delete \"{doctor['name']}\" from the Signatory List?",
+            confirm_label="Yes, Delete",
+            cancel_label="Cancel",
+            cancel_tone="danger",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        from database import delete_doctor
+        delete_doctor(doctor['id'])
+        self._refresh_doctors_list()
+        self._refresh_doctor_combos()
 
     def _make_tabs(self):
         wrap = QWidget()
