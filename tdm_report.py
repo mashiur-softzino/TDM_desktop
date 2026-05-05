@@ -1858,7 +1858,7 @@ class TDMMainWindow(QMainWindow):
         if getattr(self, '_sampling_mode', 'multi') == 'direct':
             try:
                 val = float(self._direct_auc_edit.text().strip())
-                return val > 0
+                return val > 0 and bool(self.f_dose.text().strip())
             except (ValueError, AttributeError):
                 return False
         return all([
@@ -1870,7 +1870,7 @@ class TDMMainWindow(QMainWindow):
     def _can_generate_or_save(self):
         if not self.f_name.text().strip() or not self._has_required_sampling_fields():
             return False
-        # Direct AUC mode only needs a valid AUC value (checked above)
+        # Direct AUC mode only needs a valid AUC value and dose (checked above)
         if getattr(self, '_sampling_mode', 'multi') == 'direct':
             return True
         times, concs = self._read_table(skip_empty=False)
@@ -2766,6 +2766,8 @@ class DoctorManagementModal(QDialog):
 from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
 class DoctorEditModal(QDialog):
+    MAX_SIGNATURE_SIZE_BYTES = 2 * 1024 * 1024
+
     def __init__(self, doctor=None, parent=None):
         super().__init__(parent)
         self.doctor = doctor
@@ -2913,8 +2915,11 @@ class DoctorEditModal(QDialog):
         sig_box_lay.addWidget(self.sig_label)
         sig_row.addWidget(sig_box, 2)
 
+        sig_actions = QVBoxLayout()
+        sig_actions.setSpacing(10)
+
         upload_btn = QPushButton("Upload Signature")
-        upload_btn.setFixedHeight(100)
+        upload_btn.setFixedHeight(46)
         upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         upload_btn.setIcon(qta.icon("mdi6.upload", color="#2563EB"))
         upload_btn.setStyleSheet("""
@@ -2925,9 +2930,30 @@ class DoctorEditModal(QDialog):
             QPushButton:hover { background: #DBEAFE; }
         """)
         upload_btn.clicked.connect(self._upload_sig)
-        sig_row.addWidget(upload_btn, 1)
+        sig_actions.addWidget(upload_btn)
+
+        self.remove_sig_btn = QPushButton("Remove Signature")
+        self.remove_sig_btn.setFixedHeight(46)
+        self.remove_sig_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_sig_btn.setIcon(qta.icon("mdi6.close", color="#DC2626"))
+        self.remove_sig_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEF2F2; color: #DC2626; border: 1.5px solid #FECACA;
+                border-radius: 12px; padding: 8px; font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover { background: #FEE2E2; }
+        """)
+        self.remove_sig_btn.clicked.connect(self._remove_sig)
+        self.remove_sig_btn.setVisible(bool(self.sig_path))
+        sig_actions.addWidget(self.remove_sig_btn)
+        sig_actions.addStretch()
+        sig_row.addLayout(sig_actions, 1)
         
         sig_sec.addLayout(sig_row)
+        sig_note = QLabel("Note: Upload PNG, JPG, JPEG, or BMP signature image up to 2 MB.")
+        sig_note.setWordWrap(True)
+        sig_note.setStyleSheet("color: #64748B; font-size: 11px; background: transparent;")
+        sig_sec.addWidget(sig_note)
         body_lay.addLayout(sig_sec)
         
         body_lay.addSpacing(10)
@@ -3037,6 +3063,14 @@ class DoctorEditModal(QDialog):
     def _upload_sig(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Signature Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
         if file_path:
+            try:
+                file_size = Path(file_path).stat().st_size
+            except OSError:
+                self._show_error("File Error", "Unable to read the selected signature file.")
+                return
+            if file_size > self.MAX_SIGNATURE_SIZE_BYTES:
+                self._show_error("File Too Large", "Signature image must be 2 MB or smaller.")
+                return
             # Copy to app signatures dir
             from app_paths import ensure_data_dirs
             import shutil
@@ -3050,13 +3084,21 @@ class DoctorEditModal(QDialog):
                 self._update_sig_preview()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to copy signature: {e}")
+
+    def _remove_sig(self):
+        self.sig_path = None
+        self._update_sig_preview()
                 
     def _update_sig_preview(self):
         if self.sig_path and Path(self.sig_path).exists():
             pix = QPixmap(self.sig_path)
             self.sig_label.setPixmap(pix.scaled(self.sig_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self.sig_label.setText("")
         else:
+            self.sig_label.setPixmap(QPixmap())
             self.sig_label.setText("No Signature Uploaded")
+        if hasattr(self, 'remove_sig_btn'):
+            self.remove_sig_btn.setVisible(bool(self.sig_path))
             
     def _save(self):
         name = self.name_edit.text().strip()

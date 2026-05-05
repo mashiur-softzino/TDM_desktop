@@ -156,6 +156,8 @@ def init_db():
                 record_type            TEXT NOT NULL DEFAULT 'sample',
                 saved_at               TEXT NOT NULL,
                 report_path            TEXT,
+                sampling_mode          TEXT NOT NULL DEFAULT 'multi',
+                direct_auc             TEXT,
                 sample_rows_json       TEXT,
                 duration_options_json  TEXT,
                 drug                   TEXT,
@@ -207,6 +209,8 @@ def init_db():
                 id                     TEXT PRIMARY KEY,
                 saved_at               TEXT NOT NULL,
                 report_path            TEXT,
+                sampling_mode          TEXT NOT NULL DEFAULT 'multi',
+                direct_auc             TEXT,
                 sample_rows_json       TEXT,
                 duration_options_json  TEXT,
                 times_json             TEXT,
@@ -234,6 +238,94 @@ def init_db():
                 checked_by_id          INTEGER REFERENCES doctors(id)
             )
         """)
+        if not _column_exists(conn, "doctors", "type"):
+            conn.execute("ALTER TABLE doctors ADD COLUMN type TEXT NOT NULL DEFAULT 'doctor'")
+        if not _column_exists(conn, "doctors", "phone"):
+            conn.execute("ALTER TABLE doctors ADD COLUMN phone TEXT")
+
+        # Migrations for patients
+        if not _column_exists(conn, 'patients', 'pid'):
+            conn.execute("ALTER TABLE patients ADD COLUMN pid TEXT")
+        
+        # Hospital number / Invoice number renames
+        if _column_exists(conn, 'patients', 'hosp_no') and not _column_exists(conn, 'patients', 'invoice_number'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN hosp_no TO invoice_number")
+        elif not _column_exists(conn, 'patients', 'invoice_number'):
+            conn.execute("ALTER TABLE patients ADD COLUMN invoice_number TEXT")
+            
+        if _column_exists(conn, 'patients', 'weight') and not _column_exists(conn, 'patients', 'invoice_date'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN weight TO invoice_date")
+        elif not _column_exists(conn, 'patients', 'invoice_date'):
+            conn.execute("ALTER TABLE patients ADD COLUMN invoice_date TEXT")
+
+        if _column_exists(conn, 'patients', 'ward') and not _column_exists(conn, 'patients', 'report_number'):
+            conn.execute("ALTER TABLE patients RENAME COLUMN ward TO report_number")
+        elif not _column_exists(conn, 'patients', 'report_number'):
+            conn.execute("ALTER TABLE patients ADD COLUMN report_number TEXT")
+
+        if not _column_exists(conn, 'patients', 'delivery_date'):
+            conn.execute("ALTER TABLE patients ADD COLUMN delivery_date TEXT")
+
+        # Migrations for records
+        if not _column_exists(conn, 'records', 'report_path'):
+            conn.execute("ALTER TABLE records ADD COLUMN report_path TEXT")
+        if not _column_exists(conn, 'records', 'sampling_mode'):
+            conn.execute("ALTER TABLE records ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
+        if not _column_exists(conn, 'records', 'direct_auc'):
+            conn.execute("ALTER TABLE records ADD COLUMN direct_auc TEXT")
+        if not _column_exists(conn, 'records', 'sample_rows_json'):
+            conn.execute("ALTER TABLE records ADD COLUMN sample_rows_json TEXT")
+        if not _column_exists(conn, 'records', 'duration_options_json'):
+            conn.execute("ALTER TABLE records ADD COLUMN duration_options_json TEXT")
+        if not _column_exists(conn, 'records', 'prepared_by_id'):
+            conn.execute("ALTER TABLE records ADD COLUMN prepared_by_id INTEGER")
+        if not _column_exists(conn, 'records', 'checked_by_id'):
+            conn.execute("ALTER TABLE records ADD COLUMN checked_by_id INTEGER")
+
+        # Migrations for drafts
+        if not _column_exists(conn, 'drafts', 'report_path'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN report_path TEXT")
+        if not _column_exists(conn, 'drafts', 'sampling_mode'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
+        if not _column_exists(conn, 'drafts', 'direct_auc'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN direct_auc TEXT")
+        if not _column_exists(conn, 'drafts', 'sample_rows_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN sample_rows_json TEXT")
+        if not _column_exists(conn, 'drafts', 'duration_options_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN duration_options_json TEXT")
+        if not _column_exists(conn, 'drafts', 'times_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN times_json TEXT")
+        if not _column_exists(conn, 'drafts', 'concs_json'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN concs_json TEXT")
+        
+        # Draft fields renames
+        if _column_exists(conn, 'drafts', 'hosp_no') and not _column_exists(conn, 'drafts', 'invoice_number'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN hosp_no TO invoice_number")
+        elif not _column_exists(conn, 'drafts', 'invoice_number'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_number TEXT")
+
+        if _column_exists(conn, 'drafts', 'weight') and not _column_exists(conn, 'drafts', 'invoice_date'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN weight TO invoice_date")
+        elif not _column_exists(conn, 'drafts', 'invoice_date'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_date TEXT")
+
+        if _column_exists(conn, 'drafts', 'ward') and not _column_exists(conn, 'drafts', 'report_number'):
+            conn.execute("ALTER TABLE drafts RENAME COLUMN ward TO report_number")
+        elif not _column_exists(conn, 'drafts', 'report_number'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN report_number TEXT")
+
+        if not _column_exists(conn, 'drafts', 'delivery_date'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN delivery_date TEXT")
+        if not _column_exists(conn, 'drafts', 'prepared_by_id'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN prepared_by_id INTEGER")
+        if not _column_exists(conn, 'drafts', 'checked_by_id'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN checked_by_id INTEGER")
+
+        # PK results migrations
+        if not _column_exists(conn, 'pk_results', 'auc_lss'):
+            conn.execute("ALTER TABLE pk_results ADD COLUMN auc_lss REAL")
+        if not _column_exists(conn, 'pk_results', 'lss_equation'):
+            conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
 
         # Migrations for existing databases
         for col in ('auc_lss',):
@@ -361,13 +453,15 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
     }
 
     snapshot = {
-        'id':             record['id'],
-        'saved_at':       record['saved_at'],
-        'report_path':    record['report_path'] or '',
-        'record_type':    record['record_type'],
-        'patient':        patient,
-        'scheme':         record['scheme'] or 4,
-        'trough':         record['trough'] or '',
+        'id':          record['id'],
+        'saved_at':    record['saved_at'],
+        'report_path': record['report_path'] or '',
+        'record_type': record['record_type'],
+        'patient':     patient,
+        'sampling_mode': record['sampling_mode'] or 'multi',
+        'direct_auc':  record['direct_auc'] or '',
+        'scheme':      record['scheme'] or 4,
+        'trough':      record['trough'] or '',
         'prepared_by_id': record['prepared_by_id'],
         'checked_by_id':  record['checked_by_id'],
         'times':          times,
@@ -426,13 +520,15 @@ def _draft_row_to_snapshot(row) -> dict:
     }
 
     snapshot = {
-        'id':             row['id'],
-        'saved_at':       row['saved_at'],
-        'report_path':    row['report_path'] or '',
-        'record_type':    'draft',
-        'patient':        patient,
-        'scheme':         row['scheme'] or 4,
-        'trough':         row['trough'] or '',
+        'id':          row['id'],
+        'saved_at':    row['saved_at'],
+        'report_path': row['report_path'] or '',
+        'record_type': 'draft',
+        'patient':     patient,
+        'sampling_mode': row['sampling_mode'] or 'multi',
+        'direct_auc':  row['direct_auc'] or '',
+        'scheme':      row['scheme'] or 4,
+        'trough':      row['trough'] or '',
         'prepared_by_id': row['prepared_by_id'],
         'checked_by_id':  row['checked_by_id'],
         'times':          [],
@@ -502,10 +598,17 @@ def _save_draft(conn, snapshot: dict):
                phone                  = EXCLUDED.phone,
                prepared_by_id         = EXCLUDED.prepared_by_id,
                checked_by_id          = EXCLUDED.checked_by_id""",
+        """INSERT OR REPLACE INTO drafts
+           (id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
+            name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             snapshot['id'],
             snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
             snapshot.get('report_path'),
+            snapshot.get('sampling_mode', 'multi'),
+            snapshot.get('direct_auc', ''),
             json.dumps(snapshot.get('sample_rows', [])),
             json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
             json.dumps(snapshot.get('times', [])),
@@ -560,6 +663,8 @@ def _migrate_legacy_drafts(conn):
                 'saved_at':    row['saved_at'],
                 'report_path': row['report_path'] or '',
                 'record_type': 'draft',
+                'sampling_mode': row['sampling_mode'] if 'sampling_mode' in row.keys() and row['sampling_mode'] else 'multi',
+                'direct_auc': row['direct_auc'] if 'direct_auc' in row.keys() and row['direct_auc'] else '',
                 'patient': {
                     'name':                   row['name']          or 'N/A',
                     'age':                    row['age']           or 'N/A',
@@ -640,12 +745,19 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                    trough                 = EXCLUDED.trough,
                    prepared_by_id         = EXCLUDED.prepared_by_id,
                    checked_by_id          = EXCLUDED.checked_by_id""",
+            """INSERT OR REPLACE INTO records
+               (id, patient_id, record_type, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json,
+                drug, preparation, dose, dose_dt,
+                sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot['id'],
                 patient_id,
                 record_type,
                 snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
                 snapshot.get('report_path'),
+                snapshot.get('sampling_mode', 'multi'),
+                snapshot.get('direct_auc', ''),
                 json.dumps(snapshot.get('sample_rows', [])),
                 json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
                 patient.get('drug'),
@@ -716,10 +828,9 @@ def delete_record(record_id: str):
 def load_all() -> tuple[list, list]:
     with _connect() as conn:
         records = conn.execute("""
-            SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sample_rows_json,
-                   r.duration_options_json, r.drug, r.preparation, r.dose, r.dose_dt,
-                   r.sample_collection_date, r.co_medications, r.scheme, r.trough,
-                   r.prepared_by_id, r.checked_by_id,
+            SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sampling_mode, r.direct_auc, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
+                   r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
+                   r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
                    p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date, p.phone
             FROM   records r
@@ -745,11 +856,9 @@ def load_all() -> tuple[list, list]:
             samples.append(snapshot)
 
         draft_rows = conn.execute("""
-            SELECT id, saved_at, report_path, sample_rows_json, duration_options_json,
-                   times_json, concs_json, name, age, sex, invoice_date, invoice_number,
-                   report_number, dept, diagnosis, tx_date, delivery_date,
-                   drug, preparation, dose, dose_dt, sample_collection_date,
-                   co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
+            SELECT id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
+                   name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+                    drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
             FROM drafts
             ORDER BY saved_at ASC, id ASC
         """).fetchall()
