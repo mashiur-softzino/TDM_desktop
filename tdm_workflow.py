@@ -1,4 +1,5 @@
 import base64
+import re
 import webbrowser
 from datetime import datetime
 from io import BytesIO
@@ -446,13 +447,25 @@ class TDMWorkflowMixin:
         self._results_dialog.canvas.fig.savefig(buf, format="png", facecolor="white", bbox_inches="tight")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
+    def _report_file_stem(self, snapshot):
+        patient = snapshot.get("patient", {})
+        pid = str(patient.get("pid") or "").strip()
+        if pid and pid != "N/A":
+            stem = f"TDM_{pid}"
+        else:
+            stem = f"TDM_Report_{snapshot.get('id', datetime.now().strftime('%y%m%d%H%M%S'))}"
+        return re.sub(r'[<>:"/\\|?*]+', "_", stem).strip(" .") or "TDM_Report"
+
+    def _expected_report_path(self, snapshot):
+        from app_paths import reports_dir
+
+        return reports_dir() / f"{self._report_file_stem(snapshot)}.html"
+
     def _save_report_file(self, snapshot, graph_uri=None):
         try:
             from report_print import build_report_html
-            from app_paths import reports_dir as get_reports_dir
 
-            reports_dir = get_reports_dir()
-            report_path = reports_dir / f"{snapshot['id']}.html"
+            report_path = self._expected_report_path(snapshot)
             prep_id = snapshot.get("prepared_by_id")
             check_id = snapshot.get("checked_by_id")
             prepared_by = get_signatory_by_id(prep_id) if prep_id else None
@@ -467,6 +480,7 @@ class TDMWorkflowMixin:
                 prepared_by=prepared_by,
                 checked_by=checked_by,
                 graph_uri=graph_uri,
+                title=self._report_file_stem(snapshot),
             )
             report_path.write_text(html, encoding="utf-8")
             snapshot["report_path"] = str(report_path)
@@ -486,9 +500,9 @@ class TDMWorkflowMixin:
             QMessageBox.information(self, "No Report Yet", "Generate a report for this sample first.")
             return
         report_path = snapshot.get("report_path")
-        if not report_path or not Path(report_path).exists():
+        expected_path = self._expected_report_path(snapshot)
+        if not report_path or not Path(report_path).exists() or Path(report_path).name != expected_path.name:
             from report_print import build_report_html
-            from app_paths import reports_dir
 
             prep_id = snapshot.get("prepared_by_id")
             check_id = snapshot.get("checked_by_id")
@@ -503,12 +517,14 @@ class TDMWorkflowMixin:
                 prepared_by=prepared_by,
                 checked_by=checked_by,
                 graph_uri=None,
+                title=self._report_file_stem(snapshot),
             )
-            if not report_path:
-                report_path = str(reports_dir() / f"{snapshot['id']}.html")
-                snapshot["report_path"] = report_path
+            report_path = str(expected_path)
+            snapshot["report_path"] = report_path
             try:
                 Path(report_path).write_text(html, encoding="utf-8")
+                if snapshot.get("id"):
+                    save_record(snapshot, snapshot.get("record_type", "sample"))
             except Exception:
                 pass
 

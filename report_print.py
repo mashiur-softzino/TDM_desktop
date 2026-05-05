@@ -32,9 +32,12 @@ def build_report_widget(patient, pk, interp, times, concs):
         lbl.setStyleSheet(f"color: {color};")
         lay.addWidget(lbl)
 
+    def label_with_colon(label):
+        return f"{str(label).rstrip(':').strip()} :"
+
     def row(label, value, color='#1A1A2E'):
         r = QHBoxLayout()
-        l = QLabel(f"<b>{label}</b>")
+        l = QLabel(f"<b>{label_with_colon(label)}</b>")
         l.setFixedWidth(210)
         l.setStyleSheet("color: #546E7A; font-size: 12px;")
         v = QLabel(str(value))
@@ -104,37 +107,37 @@ def build_report_widget(patient, pk, interp, times, concs):
     return w
 
 
-def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None, graph_uri=None):
+def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None, graph_uri=None, title="TDM Report"):
     def fmt(v, d=3):
         return f"{v:.{d}f}" if v is not None else "N/A"
+
+    def label_with_colon(label):
+        return f"{str(label).rstrip(':').strip()} :"
 
     def result_row(left_label, left_value, right_label=None, right_value=None):
         right_html = ""
         if right_label and right_value is not None:
             right_html = (
-                f'<div class="result-col"><span class="r-label">{escape(left_or_empty(right_label))}</span>'
+                f'<div class="result-col"><span class="r-label">{escape(label_with_colon(right_label))}</span>'
                 f'<span class="r-value">{escape(str(right_value))}</span></div>'
             )
         return (
             f'<div class="result-line">'
-            f'<div class="result-col"><span class="r-label">{escape(left_or_empty(left_label))}</span>'
+            f'<div class="result-col"><span class="r-label">{escape(label_with_colon(left_label))}</span>'
             f'<span class="r-value">{escape(str(left_value))}</span></div>'
             f'{right_html}</div>'
         )
-
-    def left_or_empty(text):
-        return f"{text} ="
 
     def detail_row(left_label, left_value, right_label=None, right_value=None):
         right = ""
         if right_label:
             right = (
-                f'<div class="grid-row"><div class="grid-label">{escape(right_label)}</div>'
+                f'<div class="grid-row"><div class="grid-label">{escape(label_with_colon(right_label))}</div>'
                 f'<div class="grid-value">{escape(str(right_value))}</div></div>'
             )
         return (
             '<div class="grid-pair">'
-            f'<div class="grid-row"><div class="grid-label">{escape(left_label)}</div>'
+            f'<div class="grid-row"><div class="grid-label">{escape(label_with_colon(left_label))}</div>'
             f'<div class="grid-value">{escape(str(left_value))}</div></div>'
             f'{right}'
             '</div>'
@@ -235,7 +238,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         detail_row("Invoice Number", patient.get('invoice_number', 'N/A'), "Invoice Date", patient.get('invoice_date', 'N/A')),
         detail_row("Report Number", patient.get('report_number', 'N/A'), "Delivery Date", patient.get('delivery_date', 'N/A')),
         detail_row("Date of Transplant", patient.get('tx_date', 'N/A'), "Diagnosis", patient.get('diag', 'N/A')),
-        f'<div class="single-row full-row patient-full-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
+        f'<div class="single-row full-row patient-full-row"><span class="grid-label">{escape(label_with_colon("Medication"))}</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
         '</div>',
         '</div>',
         '<div class="section-block">',
@@ -244,7 +247,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         detail_row("Dose of Requested Drug", patient.get('dose', 'N/A')),
         detail_row("Date and Time of Dose", patient.get('dose_dt', 'N/A')),
         detail_row("Date of Sample Collection", patient.get('sample_collection_date', 'N/A')),
-        f'<div class="single-row full-row"><span class="grid-label">Time of sample(s)</span><span class="grid-value">{escape(times_str)}</span></div>',
+        f'<div class="single-row full-row"><span class="grid-label">{escape(label_with_colon("Time of sample(s)"))}</span><span class="grid-value">{escape(times_str)}</span></div>',
         '</div>',
         '<div class="section-block">',
         '<div class="section-title result-title">Result:</div>',
@@ -268,14 +271,14 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         ]
     sections += [
         f'<div class="result-line result-line-interpretation">'
-        f'<div class="result-col result-interpretation"><strong>Interpretation:</strong> <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>'
+        f'<div class="result-col result-interpretation"><strong>{escape(label_with_colon("Interpretation"))}</strong> <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>'
         f'<div></div>'
         f'</div>',
     ]
     if graph_uri:
         sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>')
     sections += [
-        f'<div class="range-note"><strong>Therapeutic Range:</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
+        f'<div class="range-note"><strong>{escape(label_with_colon("Therapeutic Range"))}</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
         '</div>', # end section-block
     ]
 
@@ -314,35 +317,35 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
 <html>
 <head>
   <meta charset="utf-8">
-  <title>TDM Report</title>
+  <title>{escape(title)}</title>
   <style>
     body {{ font-family: "Times New Roman", Georgia, serif; color:#111; margin:0; background:white; }}
     .page {{ width:860px; margin:0 auto; padding:28px 32px 28px; }}
     .report-shell {{ padding:0; }}
     .header-box {{ margin-bottom:12px; }}
-    .header-top {{ text-align:center; font-size:24px; font-weight:700; letter-spacing:.2px; }}
-    .header-subline {{ text-align:left; font-size:17px; font-weight:700; margin-top:12px; }}
+    .header-top {{ text-align:center; font-size:20px; font-weight:700; letter-spacing:.2px; }}
+    .header-subline {{ text-align:left; font-size:14px; font-weight:700; margin-top:12px; }}
     .patient-box {{ border:2px solid #111; border-radius:14px; padding:12px 16px 12px; margin-bottom:14px; }}
     .section-block {{ margin-top:10px; }}
     .meta-grid {{ display:flex; flex-direction:column; gap:3px; }}
     .grid-pair {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }}
-    .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.22; font-size:15px; }}
+    .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.22; font-size:12px; }}
     .grid-label {{ width:auto; font-weight:700; white-space:nowrap; }}
     .grid-value {{ flex:1; }}
     .single-row {{ margin-top:6px; }}
     .full-row .grid-value {{ white-space: nowrap; }}
     .patient-full-row .grid-value {{ white-space: normal; }}
-    .section-title {{ font-size:16px; font-weight:700; margin:12px 0 6px; }}
+    .section-title {{ font-size:12px; font-weight:700; margin:12px 0 6px; }}
     .result-title {{ margin-top:8px; }}
     .result-line {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin:2px 0; align-items:start; }}
-    .result-col {{ display:flex; align-items:flex-start; gap:4px; font-size:15px; white-space:nowrap; }}
+    .result-col {{ display:flex; align-items:flex-start; gap:4px; font-size:12px; white-space:nowrap; }}
     .r-label {{ font-weight:700; white-space:nowrap; }}
     .r-value {{ font-weight:700; white-space:nowrap; }}
     .result-line-interpretation {{ margin-top:0; }}
-    .result-interpretation {{ font-size:15px; }}
+    .result-interpretation {{ font-size:12px; }}
     .graph-wrap {{ margin:12px auto 10px; text-align:center; border-top:1px solid #DDD; padding-top:10px; }}
     .graph-wrap img {{ width:650px; max-width:100%; height:auto; }}
-    .range-note {{ margin-top:14px; font-size:15px; line-height:1.4; }}
+    .range-note {{ margin-top:14px; font-size:12px; line-height:1.4; }}
     
     .signature-container {{ margin-top:30px; display:flex; justify-content:space-between; padding:0 10px; }}
     .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
@@ -350,7 +353,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
     .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
     .doc-name {{ font-weight:700; font-size:16px; margin-bottom:2px; color:#000; line-height:1.2; }}
-    .doc-desc {{ font-size:13.5px; color:#111; line-height:1.35; }}
+    .doc-desc {{ font-size:12px; color:#111; line-height:1.35; }}
     
     .footer {{ margin-top:20px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
     @media print {{

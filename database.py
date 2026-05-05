@@ -595,6 +595,12 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
 
         patient_id = _get_or_create_patient(conn, patient, patient_id)
         snapshot['patient_db_id'] = patient_id
+        row = conn.execute(
+            "SELECT pid FROM patients WHERE id = %s",
+            (patient_id,),
+        ).fetchone()
+        if row:
+            patient['pid'] = row['pid'] or patient.get('pid') or 'N/A'
 
         params = (
             patient_id,
