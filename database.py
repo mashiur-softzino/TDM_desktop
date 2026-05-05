@@ -13,11 +13,7 @@ import psycopg2
 import psycopg2.extras
 
 from app_paths import ensure_data_dirs
-
-DB_URL = os.environ.get(
-    "TDM_DB_URL",
-    "postgresql://postgres:password@localhost:5432/tdm_db"
-)
+from db_config import get_db_url
 
 DEFAULT_MEDICATIONS_SEED = [
     "Tacrolimus (TAC)", "Cyclosporine (CsA)", "Mycophenolate (MPA)",
@@ -74,7 +70,8 @@ class _ConnWrapper:
 
 
 def _connect() -> _ConnWrapper:
-    conn = psycopg2.connect(DB_URL)
+    url = os.environ.get("TDM_DB_URL") or get_db_url()
+    conn = psycopg2.connect(url)
     return _ConnWrapper(conn)
 
 

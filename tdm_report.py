@@ -100,6 +100,7 @@ class TDMMainWindow(QMainWindow):
         self.page_stack.addWidget(self._build_patients_page())
         self.page_stack.addWidget(self._build_drafts_page())
         self.page_stack.addWidget(self._build_doctors_page())
+        self.page_stack.addWidget(self._build_settings_page())
         body_layout.addWidget(self.page_stack)
         body_layout.addStretch()
 
@@ -328,6 +329,163 @@ class TDMMainWindow(QMainWindow):
         self.doctor_list_card._page_index = 0
         self._refresh_doctors_list()
 
+    def _build_settings_page(self):
+        from db_config import load_db_config, save_db_config
+        import psycopg2
+
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(20)
+
+        card = Card("Database Connection", "mdi6.database-cog-outline", icon_color="#334155")
+
+        field_style = f"""
+            QLineEdit {{
+                background: #F7FAFE;
+                border: 1.5px solid #D6E2EE;
+                border-radius: 14px;
+                padding: 12px 16px;
+                font-size: 14px;
+                color: {TEXT_CLR};
+            }}
+            QLineEdit:focus {{
+                border: 1.5px solid {BLUE};
+                background: white;
+            }}
+            QLineEdit::placeholder {{
+                color: rgba(0, 0, 0, 0.22);
+            }}
+        """
+
+        cfg = load_db_config()
+
+        grid = QGridLayout()
+        grid.setSpacing(14)
+        grid.setHorizontalSpacing(18)
+
+        def make_field(placeholder, value='', password=False):
+            f = QLineEdit(value)
+            f.setPlaceholderText(placeholder)
+            f.setStyleSheet(field_style)
+            if password:
+                f.setEchoMode(QLineEdit.EchoMode.Password)
+            return f
+
+        host_lbl = small_label("HOST", color="#111111", size=12, bold=True)
+        self._db_host = make_field("e.g. localhost", cfg.get('host', 'localhost'))
+        host_col = QVBoxLayout()
+        host_col.setSpacing(6)
+        host_col.addWidget(host_lbl)
+        host_col.addWidget(self._db_host)
+
+        port_lbl = small_label("PORT", color="#111111", size=12, bold=True)
+        self._db_port = make_field("e.g. 5432", cfg.get('port', '5432'))
+        port_col = QVBoxLayout()
+        port_col.setSpacing(6)
+        port_col.addWidget(port_lbl)
+        port_col.addWidget(self._db_port)
+
+        db_lbl = small_label("DATABASE NAME", color="#111111", size=12, bold=True)
+        self._db_name = make_field("e.g. tdm_db", cfg.get('database', 'tdm_db'))
+        db_col = QVBoxLayout()
+        db_col.setSpacing(6)
+        db_col.addWidget(db_lbl)
+        db_col.addWidget(self._db_name)
+
+        user_lbl = small_label("USERNAME", color="#111111", size=12, bold=True)
+        self._db_user = make_field("e.g. postgres", cfg.get('username', 'postgres'))
+        user_col = QVBoxLayout()
+        user_col.setSpacing(6)
+        user_col.addWidget(user_lbl)
+        user_col.addWidget(self._db_user)
+
+        pass_lbl = small_label("PASSWORD", color="#111111", size=12, bold=True)
+        self._db_pass = make_field("Enter password", cfg.get('password', ''), password=True)
+        pass_col = QVBoxLayout()
+        pass_col.setSpacing(6)
+        pass_col.addWidget(pass_lbl)
+        pass_col.addWidget(self._db_pass)
+
+        grid.addLayout(host_col, 0, 0)
+        grid.addLayout(port_col, 0, 1)
+        grid.addLayout(db_col,   1, 0)
+        grid.addLayout(user_col, 1, 1)
+        grid.addLayout(pass_col, 2, 0)
+
+        self._db_status_lbl = QLabel("")
+        self._db_status_lbl.setStyleSheet("font-size: 13px; padding: 4px 0;")
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        test_btn = QPushButton("Test Connection")
+        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        test_btn.setStyleSheet("""
+            QPushButton {
+                background: #EFF6FF; color: #2563EB;
+                border: 1.5px solid #BFDBFE; border-radius: 12px;
+                padding: 10px 20px; font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: #DBEAFE; }
+        """)
+
+        save_btn = QPushButton("Save & Apply")
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: #166534; color: white;
+                border: none; border-radius: 12px;
+                padding: 10px 24px; font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: #15803D; }
+        """)
+
+        def _get_config():
+            return {
+                'host':     self._db_host.text().strip(),
+                'port':     self._db_port.text().strip(),
+                'database': self._db_name.text().strip(),
+                'username': self._db_user.text().strip(),
+                'password': self._db_pass.text(),
+            }
+
+        def _test_connection():
+            c = _get_config()
+            url = f"postgresql://{c['username']}:{c['password']}@{c['host']}:{c['port']}/{c['database']}"
+            try:
+                conn = psycopg2.connect(url, connect_timeout=5)
+                conn.close()
+                self._db_status_lbl.setText("✓ Connection successful")
+                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
+            except Exception as e:
+                self._db_status_lbl.setText(f"✗ Failed: {e}")
+                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #DC2626; padding: 4px 0;")
+
+        def _save_config():
+            c = _get_config()
+            save_db_config(c)
+            self._db_status_lbl.setText("✓ Saved. Restart the app to apply.")
+            self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
+
+        test_btn.clicked.connect(_test_connection)
+        save_btn.clicked.connect(_save_config)
+
+        btn_row.addWidget(test_btn)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch()
+
+        body = QVBoxLayout()
+        body.setSpacing(16)
+        body.addLayout(grid)
+        body.addWidget(self._db_status_lbl)
+        body.addLayout(btn_row)
+
+        card.body().addLayout(body)
+        lay.addWidget(card)
+        lay.addStretch()
+        return page
+
     def _add_doctor_from_list(self):
         dlg = DoctorEditModal(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
@@ -421,7 +579,13 @@ class TDMMainWindow(QMainWindow):
         self.doctors_tab_btn.setIcon(qta.icon("mdi6.account-group-outline", color="#718096"))
         self.doctors_tab_btn.clicked.connect(lambda: self._switch_page(3))
 
-        for btn in [self.report_tab_btn, self.patients_tab_btn, self.drafts_tab_btn, self.doctors_tab_btn]:
+        self.settings_tab_btn = QPushButton("Settings")
+        self.settings_tab_btn.setObjectName("mainTab")
+        self.settings_tab_btn.setIcon(qta.icon("mdi6.cog-outline", color="#718096"))
+        self.settings_tab_btn.clicked.connect(lambda: self._switch_page(4))
+
+        for btn in [self.report_tab_btn, self.patients_tab_btn, self.drafts_tab_btn,
+                    self.doctors_tab_btn, self.settings_tab_btn]:
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(42)
             btn.setCheckable(True)
@@ -432,6 +596,7 @@ class TDMMainWindow(QMainWindow):
         shell_lay.addWidget(self.patients_tab_btn)
         shell_lay.addWidget(self.drafts_tab_btn)
         shell_lay.addWidget(self.doctors_tab_btn)
+        shell_lay.addWidget(self.settings_tab_btn)
 
         row.addWidget(shell)
         row.addStretch()
@@ -456,6 +621,7 @@ class TDMMainWindow(QMainWindow):
         self.patients_tab_btn.setChecked(index == 1)
         self.drafts_tab_btn.setChecked(index == 2)
         self.doctors_tab_btn.setChecked(index == 3)
+        self.settings_tab_btn.setChecked(index == 4)
         def tab_style(kind, active):
             palette = {
                 'report': {
@@ -481,6 +647,12 @@ class TDMMainWindow(QMainWindow):
                     'border': "#C4B5FD",
                     'color': "#5B21B6",
                     'hover': "#F5F3FF",
+                },
+                'settings': {
+                    'bg': "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #F8FAFC, stop:1 #F1F5F9)",
+                    'border': "#CBD5E1",
+                    'color': "#334155",
+                    'hover': "#F8FAFC",
                 },
             }[kind]
             if active:
@@ -521,6 +693,7 @@ class TDMMainWindow(QMainWindow):
         self.patients_tab_btn.setStyleSheet(tab_style('sample', index == 1))
         self.drafts_tab_btn.setStyleSheet(tab_style('draft', index == 2))
         self.doctors_tab_btn.setStyleSheet(tab_style('doctor', index == 3))
+        self.settings_tab_btn.setStyleSheet(tab_style('settings', index == 4))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
