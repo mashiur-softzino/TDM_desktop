@@ -93,9 +93,19 @@ def main():
     app.processEvents()
 
     from tdm_report import TDMMainWindow, STYLE
-    from database import create_database_backup
+    from database import create_database_backup, test_db_connection
 
     app.setStyleSheet(STYLE)
+
+    # Check DB connection before opening main window
+    if test_db_connection() is not None:
+        splash.hide()
+        from db_connection_dialog import DBConnectionDialog
+        dlg = DBConnectionDialog()
+        if dlg.exec() != DBConnectionDialog.DialogCode.Accepted:
+            sys.exit(0)
+        splash.show()
+        app.processEvents()
 
     window = TDMMainWindow()
     window.show()

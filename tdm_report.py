@@ -452,9 +452,12 @@ class TDMMainWindow(QMainWindow):
 
         def _test_connection():
             c = _get_config()
-            url = f"postgresql://{c['username']}:{c['password']}@{c['host']}:{c['port']}/{c['database']}"
             try:
-                conn = psycopg2.connect(url, connect_timeout=5)
+                conn = psycopg2.connect(
+                    host=c['host'], port=int(c['port']),
+                    dbname=c['database'], user=c['username'],
+                    password=c['password'] or None, connect_timeout=5,
+                )
                 conn.close()
                 self._db_status_lbl.setText("✓ Connection successful")
                 self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
@@ -462,14 +465,25 @@ class TDMMainWindow(QMainWindow):
                 self._db_status_lbl.setText(f"✗ Failed: {e}")
                 self._db_status_lbl.setStyleSheet("font-size: 13px; color: #DC2626; padding: 4px 0;")
 
-        def _save_config():
+        def _save_and_reconnect():
             c = _get_config()
+            try:
+                conn = psycopg2.connect(
+                    host=c['host'], port=int(c['port']),
+                    dbname=c['database'], user=c['username'],
+                    password=c['password'] or None, connect_timeout=5,
+                )
+                conn.close()
+            except Exception as e:
+                self._db_status_lbl.setText(f"✗ Cannot save — connection failed: {e}")
+                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #DC2626; padding: 4px 0;")
+                return
             save_db_config(c)
-            self._db_status_lbl.setText("✓ Saved. Restart the app to apply.")
+            self._db_status_lbl.setText("✓ Saved & reconnected successfully")
             self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
 
         test_btn.clicked.connect(_test_connection)
-        save_btn.clicked.connect(_save_config)
+        save_btn.clicked.connect(_save_and_reconnect)
 
         btn_row.addWidget(test_btn)
         btn_row.addWidget(save_btn)

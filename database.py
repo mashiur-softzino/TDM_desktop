@@ -70,9 +70,30 @@ class _ConnWrapper:
 
 
 def _connect() -> _ConnWrapper:
-    url = os.environ.get("TDM_DB_URL") or get_db_url()
-    conn = psycopg2.connect(url)
+    env_url = os.environ.get("TDM_DB_URL")
+    if env_url:
+        conn = psycopg2.connect(env_url)
+    else:
+        from db_config import load_db_config
+        c = load_db_config()
+        conn = psycopg2.connect(
+            host=c['host'],
+            port=int(c.get('port', 5432)),
+            dbname=c['database'],
+            user=c['username'],
+            password=c['password'] or None,
+        )
     return _ConnWrapper(conn)
+
+
+def test_db_connection() -> str | None:
+    """Returns None on success, error message on failure."""
+    try:
+        with _connect() as conn:
+            conn.execute("SELECT 1")
+        return None
+    except Exception as e:
+        return str(e)
 
 
 # ─────────────────────────────────────────
