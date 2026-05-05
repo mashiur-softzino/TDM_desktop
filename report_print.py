@@ -235,7 +235,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         detail_row("Invoice Number", patient.get('invoice_number', patient.get('hosp_id', 'N/A')), "Invoice Date", patient.get('invoice_date', patient.get('weight', 'N/A'))),
         detail_row("Report Number", patient.get('report_number', patient.get('ward', 'N/A')), "Delivery Date", patient.get('delivery_date', 'N/A')),
         detail_row("Date of Transplant", patient.get('tx_date', 'N/A'), "Diagnosis", patient.get('diag', 'N/A')),
-        detail_row("Medication", patient.get('med', 'N/A')),
+        f'<div class="single-row full-row patient-full-row"><span class="grid-label">Medication</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
         '</div>',
         '</div>',
         '<div class="section-block">',
@@ -331,6 +331,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .grid-value {{ flex:1; }}
     .single-row {{ margin-top:6px; }}
     .full-row .grid-value {{ white-space: nowrap; }}
+    .patient-full-row .grid-value {{ white-space: normal; }}
     .section-title {{ font-size:16px; font-weight:700; margin:12px 0 6px; }}
     .result-title {{ margin-top:8px; }}
     .result-line {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin:2px 0; align-items:start; }}

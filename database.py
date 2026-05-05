@@ -255,6 +255,8 @@ def init_db():
                 record_type            TEXT NOT NULL DEFAULT 'sample',
                 saved_at               TEXT NOT NULL,
                 report_path            TEXT,
+                sampling_mode          TEXT NOT NULL DEFAULT 'multi',
+                direct_auc             TEXT,
                 sample_rows_json       TEXT,
                 duration_options_json  TEXT,
                 drug                   TEXT,
@@ -306,6 +308,8 @@ def init_db():
                 id                     TEXT PRIMARY KEY,
                 saved_at               TEXT NOT NULL,
                 report_path            TEXT,
+                sampling_mode          TEXT NOT NULL DEFAULT 'multi',
+                direct_auc             TEXT,
                 sample_rows_json       TEXT,
                 duration_options_json  TEXT,
                 times_json             TEXT,
@@ -364,6 +368,10 @@ def init_db():
         # Migrations for records
         if not _column_exists(conn, 'records', 'report_path'):
             conn.execute("ALTER TABLE records ADD COLUMN report_path TEXT")
+        if not _column_exists(conn, 'records', 'sampling_mode'):
+            conn.execute("ALTER TABLE records ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
+        if not _column_exists(conn, 'records', 'direct_auc'):
+            conn.execute("ALTER TABLE records ADD COLUMN direct_auc TEXT")
         if not _column_exists(conn, 'records', 'sample_rows_json'):
             conn.execute("ALTER TABLE records ADD COLUMN sample_rows_json TEXT")
         if not _column_exists(conn, 'records', 'duration_options_json'):
@@ -376,6 +384,10 @@ def init_db():
         # Migrations for drafts
         if not _column_exists(conn, 'drafts', 'report_path'):
             conn.execute("ALTER TABLE drafts ADD COLUMN report_path TEXT")
+        if not _column_exists(conn, 'drafts', 'sampling_mode'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
+        if not _column_exists(conn, 'drafts', 'direct_auc'):
+            conn.execute("ALTER TABLE drafts ADD COLUMN direct_auc TEXT")
         if not _column_exists(conn, 'drafts', 'sample_rows_json'):
             conn.execute("ALTER TABLE drafts ADD COLUMN sample_rows_json TEXT")
         if not _column_exists(conn, 'drafts', 'duration_options_json'):
@@ -525,6 +537,8 @@ def _row_to_snapshot(record: sqlite3.Row, points: list, pk_row) -> dict:
         'report_path': record['report_path'] or '',
         'record_type': record['record_type'],
         'patient':     patient,
+        'sampling_mode': record['sampling_mode'] or 'multi',
+        'direct_auc':  record['direct_auc'] or '',
         'scheme':      record['scheme'] or 4,
         'trough':      record['trough'] or '',
         'prepared_by_id': record['prepared_by_id'],
@@ -590,6 +604,8 @@ def _draft_row_to_snapshot(row: sqlite3.Row) -> dict:
         'report_path': row['report_path'] or '',
         'record_type': 'draft',
         'patient':     patient,
+        'sampling_mode': row['sampling_mode'] or 'multi',
+        'direct_auc':  row['direct_auc'] or '',
         'scheme':      row['scheme'] or 4,
         'trough':      row['trough'] or '',
         'prepared_by_id': row['prepared_by_id'],
@@ -627,14 +643,16 @@ def _save_draft(conn: sqlite3.Connection, snapshot: dict):
     checked_by_id = snapshot.get('checked_by_id') or None
     conn.execute(
         """INSERT OR REPLACE INTO drafts
-           (id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
+           (id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
             name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
             drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             snapshot['id'],
             snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
             snapshot.get('report_path'),
+            snapshot.get('sampling_mode', 'multi'),
+            snapshot.get('direct_auc', ''),
             json.dumps(snapshot.get('sample_rows', [])),
             json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
             json.dumps(snapshot.get('times', [])),
@@ -688,6 +706,8 @@ def _migrate_legacy_drafts(conn: sqlite3.Connection):
                 'saved_at': row['saved_at'],
                 'report_path': row['report_path'] or '',
                 'record_type': 'draft',
+                'sampling_mode': row['sampling_mode'] if 'sampling_mode' in row.keys() and row['sampling_mode'] else 'multi',
+                'direct_auc': row['direct_auc'] if 'direct_auc' in row.keys() and row['direct_auc'] else '',
                 'patient': {
                     'name': row['name'] or 'N/A',
                     'age': row['age'] or 'N/A',
@@ -744,16 +764,18 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
 
         conn.execute(
             """INSERT OR REPLACE INTO records
-               (id, patient_id, record_type, saved_at, report_path, sample_rows_json, duration_options_json,
+               (id, patient_id, record_type, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json,
                 drug, preparation, dose, dose_dt,
                 sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot['id'],
                 patient_id,
                 record_type,
                 snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
                 snapshot.get('report_path'),
+                snapshot.get('sampling_mode', 'multi'),
+                snapshot.get('direct_auc', ''),
                 json.dumps(snapshot.get('sample_rows', [])),
                 json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
                 patient.get('drug'),
@@ -816,7 +838,7 @@ def load_all() -> tuple[list, list]:
     """Return (samples, drafts) as lists of snapshot dicts."""
     with _connect() as conn:
         records = conn.execute("""
-            SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
+            SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sampling_mode, r.direct_auc, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
                    r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
@@ -843,7 +865,7 @@ def load_all() -> tuple[list, list]:
             samples.append(snapshot)
 
         draft_rows = conn.execute("""
-            SELECT id, saved_at, report_path, sample_rows_json, duration_options_json, times_json, concs_json,
+            SELECT id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
                    name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
                     drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
             FROM drafts
