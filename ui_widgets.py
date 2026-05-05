@@ -351,6 +351,96 @@ class ConfirmActionModal(QDialog):
         lay.addWidget(body)
 
 
+class AlertModal(QDialog):
+    def __init__(self, title: str, message: str, tone: str = "error", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedWidth(400)
+        self.setModal(True)
+        self.setStyleSheet("QDialog { background: white; border-radius: 20px; }")
+
+        is_error   = tone == "error"
+        is_warning = tone == "warning"
+
+        if is_error:
+            grad   = "stop:0 #DC2626, stop:1 #F97316"
+            icon   = "mdi6.alert-circle-outline"
+            ok_bg  = "#DC2626"
+            ok_hov = "#B91C1C"
+        elif is_warning:
+            grad   = "stop:0 #D97706, stop:1 #F59E0B"
+            icon   = "mdi6.alert-outline"
+            ok_bg  = "#D97706"
+            ok_hov = "#B45309"
+        else:
+            grad   = "stop:0 #166534, stop:1 #16A34A"
+            icon   = "mdi6.check-circle-outline"
+            ok_bg  = "#166534"
+            ok_hov = "#15803D"
+
+        # Show only the first non-empty line; cap at 180 chars
+        first_line = next(
+            (l.strip() for l in message.strip().splitlines() if l.strip()), message.strip()
+        )
+        short = first_line[:180] + ("…" if len(first_line) > 180 else "")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        banner = QFrame()
+        banner.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, {grad});
+            border-top-left-radius: 12px; border-top-right-radius: 12px;
+        """)
+        banner_lay = QHBoxLayout(banner)
+        banner_lay.setContentsMargins(24, 20, 24, 20)
+        banner_lay.setSpacing(14)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(40, 40)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setPixmap(qta.icon(icon, color="white").pixmap(22, 22))
+        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.2); border-radius: 20px;")
+        banner_lay.addWidget(icon_lbl)
+
+        t = QLabel(title)
+        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
+        banner_lay.addWidget(t)
+        banner_lay.addStretch()
+        lay.addWidget(banner)
+
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(24, 20, 24, 20)
+        body_lay.setSpacing(16)
+
+        msg = QLabel(short)
+        msg.setWordWrap(True)
+        msg.setStyleSheet(f"font-size: 13px; color: {TEXT_CLR}; line-height: 1.4;")
+        body_lay.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedHeight(38)
+        ok_btn.setMinimumWidth(80)
+        ok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {ok_bg}; color: white;
+                border: none; border-radius: 10px;
+                font-size: 13px; font-weight: bold; padding: 0 20px;
+            }}
+            QPushButton:hover {{ background: {ok_hov}; }}
+        """)
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        btn_row.addWidget(ok_btn)
+        body_lay.addLayout(btn_row)
+        lay.addWidget(body)
+
+
 class DurationChip(QWidget):
     selected = pyqtSignal(int)
     removed = pyqtSignal(int)

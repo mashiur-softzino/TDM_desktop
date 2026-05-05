@@ -28,7 +28,7 @@ from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
                            sampling_times_for_duration, make_shadow, small_label)
 from ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
-                        ToastMessage, ConfirmActionModal)
+                        ToastMessage, ConfirmActionModal, AlertModal)
 from ui_sampling import ModernSampleTable, MedicationSelector
 from ui_patients import ResultsDialog, PatientRow, PatientsListCard, DoctorRow, DoctorsListCard
 
@@ -413,9 +413,6 @@ class TDMMainWindow(QMainWindow):
         grid.addLayout(user_col, 1, 1)
         grid.addLayout(pass_col, 2, 0)
 
-        self._db_status_lbl = QLabel("")
-        self._db_status_lbl.setStyleSheet("font-size: 13px; padding: 4px 0;")
-
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
 
@@ -459,11 +456,9 @@ class TDMMainWindow(QMainWindow):
                     password=c['password'] or None, connect_timeout=5,
                 )
                 conn.close()
-                self._db_status_lbl.setText("✓ Connection successful")
-                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
+                AlertModal("Connection Successful", "Successfully connected to the database.", tone="success", parent=self).exec()
             except Exception as e:
-                self._db_status_lbl.setText(f"✗ Failed: {e}")
-                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #DC2626; padding: 4px 0;")
+                AlertModal("Connection Failed", str(e), tone="error", parent=self).exec()
 
         def _save_and_reconnect():
             c = _get_config()
@@ -475,12 +470,10 @@ class TDMMainWindow(QMainWindow):
                 )
                 conn.close()
             except Exception as e:
-                self._db_status_lbl.setText(f"✗ Cannot save — connection failed: {e}")
-                self._db_status_lbl.setStyleSheet("font-size: 13px; color: #DC2626; padding: 4px 0;")
+                AlertModal("Save Failed", f"Cannot save — connection failed:\n{e}", tone="error", parent=self).exec()
                 return
             save_db_config(c)
-            self._db_status_lbl.setText("✓ Saved & reconnected successfully")
-            self._db_status_lbl.setStyleSheet("font-size: 13px; color: #166534; font-weight: bold; padding: 4px 0;")
+            AlertModal("Settings Saved", "Database settings saved and reconnected successfully.", tone="success", parent=self).exec()
 
         test_btn.clicked.connect(_test_connection)
         save_btn.clicked.connect(_save_and_reconnect)
@@ -492,7 +485,6 @@ class TDMMainWindow(QMainWindow):
         body = QVBoxLayout()
         body.setSpacing(16)
         body.addLayout(grid)
-        body.addWidget(self._db_status_lbl)
         body.addLayout(btn_row)
 
         card.body().addLayout(body)
