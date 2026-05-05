@@ -2,7 +2,6 @@
 UI constants, colours, global stylesheet, and small helper functions.
 """
 
-from pathlib import Path
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QLabel
 from PyQt6.QtGui import QColor
 
@@ -36,7 +35,6 @@ def sampling_times_for_duration(duration: int) -> list:
         times.append(last)
     return times
 
-PATIENTS_FILE = Path(__file__).resolve().with_name("saved_patients.json")  # used only for migration
 
 # ─────────────────────────────────────────
 # Global stylesheet

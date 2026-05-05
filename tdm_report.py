@@ -5,39 +5,36 @@ ui_sampling, and ui_patients.
 """
 
 import sys
-from app_logger import (
-    log_report_generated, log_draft_saved,
-    log_record_loaded, log_record_deleted, log_report_printed, log_error,
-)
 from database import (
-    init_db, save_record, delete_record, load_all, migrate_from_json,
+    init_db,
     load_duration_options, save_duration_options, load_medications,
     add_medication, update_medication, delete_medication,
-    load_doctors, add_doctor, update_doctor, delete_doctor, get_doctor_by_id
+    load_signatories, add_signatory, update_signatory, delete_signatory, get_signatory_by_id
 )
 import tempfile
-import webbrowser
-import base64
-from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 
 from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
                            DEFAULT_DURATION_OPTIONS,
-                           BASE_SAMPLE_TIMES, PATIENTS_FILE, STYLE,
+                           BASE_SAMPLE_TIMES, STYLE,
                            sampling_times_for_duration, make_shadow, small_label)
 from ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
                         ToastMessage, ConfirmActionModal, AlertModal)
-from ui_sampling import ModernSampleTable, MedicationSelector
-from ui_patients import ResultsDialog, PatientRow, PatientsListCard, DoctorRow, DoctorsListCard
+from ui_sampling import ModernSampleTable, MedicationSelector, GradientCanvas
+from ui_patients import ResultsDialog, PatientRow, PatientsListCard, SignatoryRow, SignatoriesListCard
+from ui_signatory import SignatoryManagementModal, SignatoryEditModal
+from ui_settings import build_settings_page
+from tdm_validators import is_valid_direct_auc, is_valid_phone
+from tdm_workflow import TDMWorkflowMixin
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
     QMessageBox, QDialog, QComboBox,
     QSizePolicy, QGridLayout,
-    QStackedWidget, QListWidget, QListWidgetItem, QDialogButtonBox, QFileDialog,
+    QStackedWidget, QDialogButtonBox,
     QPlainTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
@@ -45,7 +42,7 @@ from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, 
 import qtawesome as qta
 from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, canonical_drug_name
 
-class TDMMainWindow(QMainWindow):
+class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("TDM Report — Therapeutic Drug Monitoring")
@@ -60,7 +57,6 @@ class TDMMainWindow(QMainWindow):
         self._debounce.timeout.connect(self._live_plot)
         init_db()
         self._global_duration_options = load_duration_options(DEFAULT_DURATION_OPTIONS)
-        migrate_from_json(PATIENTS_FILE)
         self._setup_ui()
         # Defer heavy work (data load + sampling card build) to after window shows
         QTimer.singleShot(0, self._deferred_init)
@@ -99,7 +95,7 @@ class TDMMainWindow(QMainWindow):
         self.page_stack.addWidget(self._build_report_page())
         self.page_stack.addWidget(self._build_patients_page())
         self.page_stack.addWidget(self._build_drafts_page())
-        self.page_stack.addWidget(self._build_doctors_page())
+        self.page_stack.addWidget(self._build_signatories_page())
         self.page_stack.addWidget(self._build_settings_page())
         body_layout.addWidget(self.page_stack)
         body_layout.addStretch()
@@ -125,6 +121,28 @@ class TDMMainWindow(QMainWindow):
                 frame = self.frameGeometry()
                 frame.moveCenter(available.center())
                 self.move(frame.topLeft())
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "_debounce") and self._debounce is not None:
+                self._debounce.stop()
+        except Exception:
+            pass
+
+        try:
+            if self._results_dialog is not None:
+                self._results_dialog.shutdown()
+                self._results_dialog.close()
+        except Exception:
+            pass
+
+        try:
+            for canvas in self.findChildren(GradientCanvas):
+                canvas.cleanup()
+        except Exception:
+            pass
+
+        super().closeEvent(event)
 
     def _deferred_init(self):
         """Runs after the event loop starts (window already visible).
@@ -313,244 +331,84 @@ class TDMMainWindow(QMainWindow):
         lay.addWidget(self.draft_list_card)
         return page
 
-    def _build_doctors_page(self):
+    def _build_signatories_page(self):
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(20)
-        self.doctor_list_card = DoctorsListCard()
-        self.doctor_list_card.search_changed.connect(self._on_doctor_search_changed)
-        self.doctor_list_card.page_changed.connect(lambda: self._refresh_doctors_list())
-        self.doctor_list_card._add_btn.clicked.connect(self._add_doctor_from_list)
-        lay.addWidget(self.doctor_list_card)
+        self.signatory_list_card = SignatoriesListCard()
+        self.signatory_list_card.search_changed.connect(self._on_signatory_search_changed)
+        self.signatory_list_card.page_changed.connect(lambda: self._refresh_signatories_list())
+        self.signatory_list_card._add_btn.clicked.connect(self._add_signatory_from_list)
+        lay.addWidget(self.signatory_list_card)
         return page
 
-    def _on_doctor_search_changed(self, _):
-        self.doctor_list_card._page_index = 0
-        self._refresh_doctors_list()
+    def _on_signatory_search_changed(self, _):
+        self.signatory_list_card._page_index = 0
+        self._refresh_signatories_list()
 
     def _build_settings_page(self):
-        from db_config import load_db_config, save_db_config
-        import psycopg2
+        return build_settings_page(self)
 
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(20)
 
-        card = Card("Database Connection", "mdi6.database-cog-outline", icon_color="#334155")
-
-        field_style = f"""
-            QLineEdit {{
-                background: #F7FAFE;
-                border: 1.5px solid #D6E2EE;
-                border-radius: 14px;
-                padding: 12px 16px;
-                font-size: 14px;
-                color: {TEXT_CLR};
-            }}
-            QLineEdit:focus {{
-                border: 1.5px solid {BLUE};
-                background: white;
-            }}
-            QLineEdit::placeholder {{
-                color: rgba(0, 0, 0, 0.22);
-            }}
-        """
-
-        cfg = load_db_config()
-
-        grid = QGridLayout()
-        grid.setSpacing(14)
-        grid.setHorizontalSpacing(18)
-
-        def make_field(placeholder, value='', password=False):
-            f = QLineEdit(value)
-            f.setPlaceholderText(placeholder)
-            f.setStyleSheet(field_style)
-            if password:
-                f.setEchoMode(QLineEdit.EchoMode.Password)
-            return f
-
-        host_lbl = small_label("HOST", color="#111111", size=12, bold=True)
-        self._db_host = make_field("e.g. localhost", cfg.get('host', 'localhost'))
-        host_col = QVBoxLayout()
-        host_col.setSpacing(6)
-        host_col.addWidget(host_lbl)
-        host_col.addWidget(self._db_host)
-
-        port_lbl = small_label("PORT", color="#111111", size=12, bold=True)
-        self._db_port = make_field("e.g. 5432", cfg.get('port', '5432'))
-        port_col = QVBoxLayout()
-        port_col.setSpacing(6)
-        port_col.addWidget(port_lbl)
-        port_col.addWidget(self._db_port)
-
-        db_lbl = small_label("DATABASE NAME", color="#111111", size=12, bold=True)
-        self._db_name = make_field("e.g. tdm_db", cfg.get('database', 'tdm_db'))
-        db_col = QVBoxLayout()
-        db_col.setSpacing(6)
-        db_col.addWidget(db_lbl)
-        db_col.addWidget(self._db_name)
-
-        user_lbl = small_label("USERNAME", color="#111111", size=12, bold=True)
-        self._db_user = make_field("e.g. postgres", cfg.get('username', 'postgres'))
-        user_col = QVBoxLayout()
-        user_col.setSpacing(6)
-        user_col.addWidget(user_lbl)
-        user_col.addWidget(self._db_user)
-
-        pass_lbl = small_label("PASSWORD", color="#111111", size=12, bold=True)
-        self._db_pass = make_field("Enter password", cfg.get('password', ''), password=True)
-        pass_col = QVBoxLayout()
-        pass_col.setSpacing(6)
-        pass_col.addWidget(pass_lbl)
-        pass_col.addWidget(self._db_pass)
-
-        grid.addLayout(host_col, 0, 0)
-        grid.addLayout(port_col, 0, 1)
-        grid.addLayout(db_col,   1, 0)
-        grid.addLayout(user_col, 1, 1)
-        grid.addLayout(pass_col, 2, 0)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
-
-        test_btn = QPushButton("Test Connection")
-        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        test_btn.setStyleSheet("""
-            QPushButton {
-                background: #EFF6FF; color: #2563EB;
-                border: 1.5px solid #BFDBFE; border-radius: 12px;
-                padding: 10px 20px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #DBEAFE; }
-        """)
-
-        save_btn = QPushButton("Save & Apply")
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background: #166534; color: white;
-                border: none; border-radius: 12px;
-                padding: 10px 24px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #15803D; }
-        """)
-
-        def _get_config():
-            return {
-                'host':     self._db_host.text().strip(),
-                'port':     self._db_port.text().strip(),
-                'database': self._db_name.text().strip(),
-                'username': self._db_user.text().strip(),
-                'password': self._db_pass.text(),
-            }
-
-        def _test_connection():
-            c = _get_config()
-            try:
-                conn = psycopg2.connect(
-                    host=c['host'], port=int(c['port']),
-                    dbname=c['database'], user=c['username'],
-                    password=c['password'] or None, connect_timeout=5,
-                )
-                conn.close()
-                AlertModal("Connection Successful", "Successfully connected to the database.", tone="success", parent=self).exec()
-            except Exception as e:
-                AlertModal("Connection Failed", str(e), tone="error", parent=self).exec()
-
-        def _save_and_reconnect():
-            c = _get_config()
-            try:
-                conn = psycopg2.connect(
-                    host=c['host'], port=int(c['port']),
-                    dbname=c['database'], user=c['username'],
-                    password=c['password'] or None, connect_timeout=5,
-                )
-                conn.close()
-            except Exception as e:
-                AlertModal("Save Failed", f"Cannot save — connection failed:\n{e}", tone="error", parent=self).exec()
-                return
-            save_db_config(c)
-            AlertModal("Settings Saved", "Database settings saved and reconnected successfully.", tone="success", parent=self).exec()
-
-        test_btn.clicked.connect(_test_connection)
-        save_btn.clicked.connect(_save_and_reconnect)
-
-        btn_row.addWidget(test_btn)
-        btn_row.addWidget(save_btn)
-        btn_row.addStretch()
-
-        body = QVBoxLayout()
-        body.setSpacing(16)
-        body.addLayout(grid)
-        body.addLayout(btn_row)
-
-        card.body().addLayout(body)
-        lay.addWidget(card)
-        lay.addStretch()
-        return page
-
-    def _add_doctor_from_list(self):
-        dlg = DoctorEditModal(parent=self)
+    def _add_signatory_from_list(self):
+        dlg = SignatoryEditModal(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_doctors_list()
-            self._refresh_doctor_combos()
+            self._refresh_signatories_list()
+            self._refresh_signatory_combos()
 
     _DOC_PAGE_SIZE = 10
 
-    def _refresh_doctors_list(self):
-        if not hasattr(self, 'doctor_list_card'): return
-        self.doctor_list_card.clear_rows()
-        doctors = load_doctors()
-        query = self.doctor_list_card.search_text()
-        filtered = [d for d in doctors if query in d['name'].lower() or query in (d.get('phone') or '').lower()]
-        
-        self.doctor_list_card.set_count(len(filtered))
-        
+    def _refresh_signatories_list(self):
+        if not hasattr(self, 'signatory_list_card'): return
+        self.signatory_list_card.clear_rows()
+        signatories = load_signatories()
+        query = self.signatory_list_card.search_text()
+        filtered = [s for s in signatories if query in s['name'].lower() or query in (s.get('phone') or '').lower()]
+
+        self.signatory_list_card.set_count(len(filtered))
+
         if not filtered:
-            self.doctor_list_card.set_empty_text("No data found" if query else None)
-            self.doctor_list_card.set_empty_visible(True)
+            self.signatory_list_card.set_empty_text("No data found" if query else None)
+            self.signatory_list_card.set_empty_visible(True)
             return
-            
-        self.doctor_list_card.set_empty_visible(False)
-        
+
+        self.signatory_list_card.set_empty_visible(False)
+
         visible = filtered
         page_count = max(1, (len(visible) + self._DOC_PAGE_SIZE - 1) // self._DOC_PAGE_SIZE)
-        self.doctor_list_card.clamp_page_index(page_count)
-        page_index = self.doctor_list_card.page_index()
+        self.signatory_list_card.clamp_page_index(page_count)
+        page_index = self.signatory_list_card.page_index()
         start = page_index * self._DOC_PAGE_SIZE
         page_items = visible[start:start + self._DOC_PAGE_SIZE]
-        
-        for i, doc in enumerate(page_items, start + 1):
-            row = DoctorRow(doc, serial_no=i)
-            row.edit_requested.connect(self._edit_doctor_from_list)
-            row.delete_requested.connect(self._delete_doctor_from_list)
-            self.doctor_list_card.add_row(row)
-        
-        self.doctor_list_card.set_pagination(page_index, page_count, len(visible), self._DOC_PAGE_SIZE)
 
-    def _edit_doctor_from_list(self, doctor):
-        dlg = DoctorEditModal(doctor, parent=self)
+        for i, signatory in enumerate(page_items, start + 1):
+            row = SignatoryRow(signatory, serial_no=i)
+            row.edit_requested.connect(self._edit_signatory_from_list)
+            row.delete_requested.connect(self._delete_signatory_from_list)
+            self.signatory_list_card.add_row(row)
+
+        self.signatory_list_card.set_pagination(page_index, page_count, len(visible), self._DOC_PAGE_SIZE)
+
+    def _edit_signatory_from_list(self, signatory):
+        dlg = SignatoryEditModal(signatory, parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_doctors_list()
-            self._refresh_doctor_combos()
+            self._refresh_signatories_list()
+            self._refresh_signatory_combos()
 
-    def _delete_doctor_from_list(self, doctor):
+    def _delete_signatory_from_list(self, signatory):
         dlg = ConfirmActionModal(
             "Delete Signatory",
-            f"Are you sure you want to delete \"{doctor['name']}\" from the Signatory List?",
+            f"Are you sure you want to delete \"{signatory['name']}\" from the Signatory List?",
             confirm_label="Yes",
             cancel_label="No",
             parent=self,
         )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        from database import delete_doctor
-        delete_doctor(doctor['id'])
-        self._refresh_doctors_list()
-        self._refresh_doctor_combos()
+        delete_signatory(signatory['id'])
+        self._refresh_signatories_list()
+        self._refresh_signatory_combos()
 
     def _make_tabs(self):
         wrap = QWidget()
@@ -580,10 +438,10 @@ class TDMMainWindow(QMainWindow):
         self.drafts_tab_btn.setIcon(qta.icon("mdi6.file-document-edit-outline", color="#718096"))
         self.drafts_tab_btn.clicked.connect(lambda: self._switch_page(2))
 
-        self.doctors_tab_btn = QPushButton("Signatory List")
-        self.doctors_tab_btn.setObjectName("mainTab")
-        self.doctors_tab_btn.setIcon(qta.icon("mdi6.account-group-outline", color="#718096"))
-        self.doctors_tab_btn.clicked.connect(lambda: self._switch_page(3))
+        self.signatories_tab_btn = QPushButton("Signatory List")
+        self.signatories_tab_btn.setObjectName("mainTab")
+        self.signatories_tab_btn.setIcon(qta.icon("mdi6.account-group-outline", color="#718096"))
+        self.signatories_tab_btn.clicked.connect(lambda: self._switch_page(3))
 
         self.settings_tab_btn = QPushButton("Settings")
         self.settings_tab_btn.setObjectName("mainTab")
@@ -591,7 +449,7 @@ class TDMMainWindow(QMainWindow):
         self.settings_tab_btn.clicked.connect(lambda: self._switch_page(4))
 
         for btn in [self.report_tab_btn, self.patients_tab_btn, self.drafts_tab_btn,
-                    self.doctors_tab_btn, self.settings_tab_btn]:
+                    self.signatories_tab_btn, self.settings_tab_btn]:
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(42)
             btn.setCheckable(True)
@@ -601,7 +459,7 @@ class TDMMainWindow(QMainWindow):
 
         shell_lay.addWidget(self.patients_tab_btn)
         shell_lay.addWidget(self.drafts_tab_btn)
-        shell_lay.addWidget(self.doctors_tab_btn)
+        shell_lay.addWidget(self.signatories_tab_btn)
         shell_lay.addWidget(self.settings_tab_btn)
 
         row.addWidget(shell)
@@ -613,9 +471,9 @@ class TDMMainWindow(QMainWindow):
             self.sample_list_card.clear_search()
         elif index == 2 and hasattr(self, 'draft_list_card'):
             self.draft_list_card.clear_search()
-        elif index == 3 and hasattr(self, 'doctor_list_card'):
-            self.doctor_list_card._search_edit.clear()
-            self._refresh_doctors_list()
+        elif index == 3 and hasattr(self, 'signatory_list_card'):
+            self.signatory_list_card._search_edit.clear()
+            self._refresh_signatories_list()
         for i in range(self.page_stack.count()):
             w = self.page_stack.widget(i)
             if i == index:
@@ -626,7 +484,7 @@ class TDMMainWindow(QMainWindow):
         self.report_tab_btn.setChecked(index == 0)
         self.patients_tab_btn.setChecked(index == 1)
         self.drafts_tab_btn.setChecked(index == 2)
-        self.doctors_tab_btn.setChecked(index == 3)
+        self.signatories_tab_btn.setChecked(index == 3)
         self.settings_tab_btn.setChecked(index == 4)
         def tab_style(kind, active):
             palette = {
@@ -698,7 +556,7 @@ class TDMMainWindow(QMainWindow):
         self.report_tab_btn.setStyleSheet(tab_style('report', index == 0))
         self.patients_tab_btn.setStyleSheet(tab_style('sample', index == 1))
         self.drafts_tab_btn.setStyleSheet(tab_style('draft', index == 2))
-        self.doctors_tab_btn.setStyleSheet(tab_style('doctor', index == 3))
+        self.signatories_tab_btn.setStyleSheet(tab_style('doctor', index == 3))
         self.settings_tab_btn.setStyleSheet(tab_style('settings', index == 4))
 
     def resizeEvent(self, event):
@@ -1582,7 +1440,7 @@ class TDMMainWindow(QMainWindow):
 
 
     # ──────────────────────────────────────
-    # Doctor Signatures
+    # Signatory Section
     # ──────────────────────────────────────
     def _make_signature_card(self):
         card = Card("Signature Section", "mdi6.fountain-pen-tip", icon_color="#0F766E")
@@ -1650,18 +1508,18 @@ class TDMMainWindow(QMainWindow):
         
         card.body().addLayout(lay)
         # Populate initially
-        QTimer.singleShot(100, self._refresh_doctor_combos)
+        QTimer.singleShot(100, self._refresh_signatory_combos)
         return card
 
-    def _refresh_doctor_combos(self, select_prep_id=None, select_check_id=None):
-        doctors = load_doctors()
+    def _refresh_signatory_combos(self, select_prep_id=None, select_check_id=None):
+        signatories = load_signatories()
         self.prep_by_combo.clear()
         self.checked_by_combo.clear()
         
         self.prep_by_combo.addItem("Select Technologist...", 0)
         self.checked_by_combo.addItem("Select Doctor...", 0)
         
-        for d in reversed(doctors):
+        for d in reversed(signatories):
             dtype = d.get('type', 'doctor')
             if dtype == 'technologist':
                 self.prep_by_combo.addItem(d['name'], d['id'])
@@ -1675,10 +1533,10 @@ class TDMMainWindow(QMainWindow):
             idx = self.checked_by_combo.findData(select_check_id)
             if idx >= 0: self.checked_by_combo.setCurrentIndex(idx)
 
-    def _manage_doctors(self):
-        dlg = DoctorManagementModal(self)
+    def _manage_signatories(self):
+        dlg = SignatoryManagementModal(self)
         dlg.exec()
-        self._refresh_doctor_combos()
+        self._refresh_signatory_combos()
 
     def _remove_duration_option(self, duration):
         if len(self._duration_options) <= 1:
@@ -1773,1359 +1631,3 @@ class TDMMainWindow(QMainWindow):
         times.extend(post_times)
         concs.extend(post_concs)
         return times, concs
-
-    def _load_saved_patients(self):
-        try:
-            self._saved_patients, self._drafts = load_all()
-        except Exception:
-            self._saved_patients = []
-            self._drafts = []
-
-    def _patient_payload(self):
-        d_inv = self.f_invoice_date.date()
-        d_del = self.f_delivery_date.date()
-        d_sam = self.f_sample_collection_date.date()
-        d_tx  = self.f_tx_date.date()
-        
-        return {
-            'name': self.f_name.text().strip() or 'N/A',
-            'age': self.f_age.text().strip() or 'N/A',
-            'sex': '' if self.f_sex.currentText() == "Choose a gender" else self.f_sex.currentText(),
-            'invoice_date': self.f_invoice_date.date().toString("dd.MM.yyyy"),
-            'invoice_number': self.f_hosp_no.text().strip() or 'N/A',
-            'report_number': self.f_report_no.text().strip() or 'N/A',
-            'dept': self.f_referred_by.text().strip() or 'N/A',
-            'delivery_date': d_del.toString("dd.MM.yyyy") if d_del else 'N/A',
-            'drug': self.f_drug.text().strip(),
-            'preparation': self.f_preparation.text().strip(),
-            'dose': self.f_dose.text().strip(),
-            'dose_dt': self.f_dose_dt.dateTime().toString("dd.MM.yyyy 'at' hh:mmAP"),
-            'sample_collection_date': d_sam.toString("dd.MM.yyyy") if d_sam else 'N/A',
-            'diag': self.f_diag.text().strip() or 'N/A',
-            'tx_date': d_tx.toString("dd.MM.yyyy") if d_tx else 'N/A',
-            'med': self.f_med.get_text() or 'N/A',
-            'phone': self.f_phone.text().strip() or 'N/A',
-        }
-
-    def _form_signature(self):
-        return {
-            'patient': self._patient_payload(),
-            'sampling_mode': getattr(self, '_sampling_mode', 'multi'),
-            'direct_auc': self._direct_auc_edit.text().strip() if hasattr(self, '_direct_auc_edit') else '',
-            'scheme': getattr(self, '_current_scheme', 4),
-            'duration_options': list(getattr(self, '_duration_options', DEFAULT_DURATION_OPTIONS)),
-            'trough': self.trough_edit.text().strip(),
-            'sample_rows': self.sample_table.get_rows_payload(),
-            'prepared_by_id': self.prep_by_combo.currentData() if hasattr(self, 'prep_by_combo') else None,
-            'checked_by_id': self.checked_by_combo.currentData() if hasattr(self, 'checked_by_combo') else None,
-        }
-
-    def _snapshot_payload(self):
-        mode = getattr(self, '_sampling_mode', 'multi')
-        if mode == 'direct':
-            times, concs = [], []
-        else:
-            times, concs = self._read_table(skip_empty=True)
-        data = {
-            'id': datetime.now().strftime("%Y%m%d%H%M%S%f"),
-            'saved_at': datetime.now().strftime("%d/%m/%Y"),
-            'report_path': '',
-            'patient': self._patient_payload(),
-            'sampling_mode': mode,
-            'direct_auc': self._direct_auc_edit.text().strip() if hasattr(self, '_direct_auc_edit') else '',
-            'scheme': getattr(self, '_current_scheme', 4),
-            'duration_options': list(getattr(self, '_duration_options', DEFAULT_DURATION_OPTIONS)),
-            'trough': self.trough_edit.text().strip(),
-            'sample_rows': self.sample_table.get_rows_payload(),
-            'times': times,
-            'concs': concs,
-            'prepared_by_id': self.prep_by_combo.currentData(),
-            'checked_by_id': self.checked_by_combo.currentData(),
-        }
-        if hasattr(self, '_last_pk'):
-            data['pk'] = self._last_pk
-            data['interp'] = getattr(self, '_last_interp', 'N/A')
-        return data
-
-    def _has_any_concentration_input(self):
-        if self.trough_edit.text().strip():
-            return True
-        return any(row.has_concentration() for row in self.sample_table._rows)
-
-    def _has_required_sampling_fields(self):
-        if not hasattr(self, 'f_drug'):
-            return False
-        if getattr(self, '_sampling_mode', 'multi') == 'direct':
-            try:
-                val = float(self._direct_auc_edit.text().strip())
-                return val > 0 and bool(self.f_dose.text().strip())
-            except (ValueError, AttributeError):
-                return False
-        return all([
-            self.f_drug.text().strip(),
-            self.f_preparation.text().strip(),
-            self.f_dose.text().strip(),
-        ])
-
-    def _can_generate_or_save(self):
-        if not self.f_name.text().strip() or not self._has_required_sampling_fields():
-            return False
-        # Direct AUC mode only needs a valid AUC value and dose (checked above)
-        if getattr(self, '_sampling_mode', 'multi') == 'direct':
-            return True
-        times, concs = self._read_table(skip_empty=False)
-        return times is not None and len(times) >= 3
-
-    def _can_save_draft(self):
-        return bool(self.f_name.text().strip())
-
-    def _update_action_buttons(self):
-        enabled = self._can_generate_or_save()
-        draft_enabled = self._can_save_draft()
-        is_editing_saved_sample = (
-            getattr(self, '_active_record_source', None) == 'sample'
-            and bool(getattr(self, '_active_record_id', None))
-        )
-        is_editing_draft = (
-            getattr(self, '_active_record_source', None) == 'draft'
-            and bool(getattr(self, '_active_record_id', None))
-        )
-        self.calc_btn.setText("Update Report" if is_editing_saved_sample else "Generate Report")
-        if is_editing_saved_sample:
-            enabled = enabled and self._form_signature() != getattr(self, '_loaded_form_signature', None)
-        if is_editing_draft:
-            draft_enabled = draft_enabled and self._form_signature() != getattr(self, '_loaded_form_signature', None)
-        self.calc_btn.setEnabled(enabled)
-        self.calc_btn.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor)
-        for button in [self.draft_btn, getattr(self, 'sampling_draft_btn', None)]:
-            if button is None:
-                continue
-            button.setVisible(not is_editing_saved_sample)
-            button.setEnabled(draft_enabled)
-            button.setCursor(Qt.CursorShape.PointingHandCursor if draft_enabled else Qt.CursorShape.ForbiddenCursor)
-
-    _LIST_PAGE_SIZE = 10
-
-    def _reset_list_view(self, card):
-        if card is None:
-            return
-        card.set_page_index(0)
-        card.clear_search()
-
-    def _refresh_patients_list(self):
-        if not hasattr(self, 'sample_list_card'):
-            return
-
-        def sort_key(snapshot):
-            snapshot_id = str(snapshot.get('id', '') or '')
-            saved_at = str(snapshot.get('saved_at', '') or '')
-            patient = snapshot.get('patient', {})
-            invoice_number = str(patient.get('invoice_number') or patient.get('hosp_id') or '')
-            created_dt = None
-            if len(snapshot_id) >= 14 and snapshot_id[:14].isdigit():
-                try:
-                    created_dt = datetime.strptime(snapshot_id[:14], "%Y%m%d%H%M%S")
-                except ValueError:
-                    created_dt = None
-            try:
-                saved_dt = datetime.strptime(saved_at, "%d/%m/%Y")
-            except ValueError:
-                saved_dt = datetime.min
-            return (created_dt or saved_dt, snapshot_id, invoice_number)
-
-        def matches_search(snapshot, query):
-            if not query:
-                return True
-            p = snapshot.get('patient', {})
-            return (
-                query in (p.get('name') or '').lower() or
-                query in (p.get('pid') or '').lower() or
-                query in (p.get('phone') or '').lower() or
-                query in (p.get('invoice_number') or p.get('hosp_id') or '').lower()
-            )
-
-        def populate(card, items, edit_cb, delete_cb, row_type='sample', view_cb=None, print_cb=None):
-            query = card.search_text()
-            filtered = [s for s in items if matches_search(s, query)]
-            visible = sorted(filtered, key=sort_key, reverse=True)
-
-            rows_layout = card._rows_lay
-            while rows_layout.count():
-                item = rows_layout.takeAt(0)
-                widget = item.widget()
-                if widget is not None:
-                    widget.deleteLater()
-
-            if not visible:
-                card.set_empty_text("No data found" if query else None)
-                card.set_empty_visible(True)
-                return
-
-            card.set_empty_text()
-            card.set_empty_visible(False)
-            page_count = (len(visible) + self._LIST_PAGE_SIZE - 1) // self._LIST_PAGE_SIZE
-            card.clamp_page_index(page_count)
-            page_index = card.page_index()
-            start = page_index * self._LIST_PAGE_SIZE
-            page = visible[start:start + self._LIST_PAGE_SIZE]
-            remaining = []
-
-            for offset, snapshot in enumerate(page, start=start + 1):
-                row = PatientRow(snapshot, row_type=row_type, serial_no=offset)
-                row.edit_requested.connect(edit_cb)
-                if view_cb is not None:
-                    row.view_requested.connect(view_cb)
-                if print_cb is not None:
-                    row.print_requested.connect(print_cb)
-                row.delete_requested.connect(delete_cb)
-                rows_layout.addWidget(row)
-
-            if remaining:
-                def make_load_more(rest, rl, ec, dc, rt, vc, pc, btn_ref):
-                    def _load():
-                        btn_ref[0].deleteLater()
-                        for snapshot in rest[:self._LIST_PAGE_SIZE]:
-                            row = PatientRow(snapshot, row_type=rt)
-                            row.edit_requested.connect(ec)
-                            if vc is not None:
-                                row.view_requested.connect(vc)
-                            if pc is not None:
-                                row.print_requested.connect(pc)
-                            row.delete_requested.connect(dc)
-                            rl.addWidget(row)
-                        leftover = rest[self._LIST_PAGE_SIZE:]
-                        if leftover:
-                            new_btn = _make_load_more_btn(leftover, rl, ec, dc, rt, vc, pc)
-                            rl.addWidget(new_btn)
-                        else:
-                            rl.addStretch()
-                    return _load
-
-                def _make_load_more_btn(rest, rl, ec, dc, rt, vc, pc):
-                    btn = QPushButton(f"Load {min(len(rest), self._LIST_PAGE_SIZE)} more  ↓  ({len(rest)} remaining)")
-                    btn.setFixedHeight(36)
-                    btn.setStyleSheet("""
-                        QPushButton {
-                            background: #F0F4F8; color: #1A73E8;
-                            border: 1px solid #D0DCF0; border-radius: 8px;
-                            font-size: 13px; font-weight: 600;
-                        }
-                        QPushButton:hover { background: #E8F0FE; }
-                    """)
-                    btn_ref = [btn]
-                    btn.clicked.connect(make_load_more(rest, rl, ec, dc, rt, vc, pc, btn_ref))
-                    return btn
-
-                rows_layout.addWidget(
-                    _make_load_more_btn(remaining, rows_layout, edit_cb, delete_cb, row_type, view_cb, print_cb)
-                )
-            else:
-                rows_layout.addStretch()
-            card.set_pagination(page_index, page_count, len(visible), self._LIST_PAGE_SIZE)
-
-        populate(
-            self.sample_list_card,
-            self._saved_patients,
-            self._load_saved_sample,
-            self._delete_saved_patient,
-            row_type='sample',
-            view_cb=self._view_saved_sample_result,
-            print_cb=self._print_saved_sample,
-        )
-        if hasattr(self, 'draft_list_card'):
-            populate(self.draft_list_card, self._drafts, self._load_draft, self._delete_draft, row_type='draft')
-        self.sample_list_card.set_count(len(self._saved_patients))
-        if hasattr(self, 'draft_list_card'):
-            self.draft_list_card.set_count(len(self._drafts))
-
-    def _save_draft(self):
-        phone = self.f_phone.text().strip()
-        if phone:
-            if not phone.isdigit() or len(phone) != 11:
-                self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
-                return
-        snapshot = self._snapshot_payload()
-        snapshot.pop('pk', None)
-        snapshot.pop('interp', None)
-        if getattr(self, '_active_record_source', None) == 'draft' and getattr(self, '_active_record_id', None):
-            delete_record(self._active_record_id)
-        save_record(snapshot, 'draft')
-        p = snapshot.get('patient', {})
-        log_draft_saved(p.get('pid', 'N/A'), p.get('name', 'N/A'))
-        self._load_saved_patients()
-        self._reset_list_view(getattr(self, 'draft_list_card', None))
-        self._refresh_patients_list()
-        self._clear_form_state()
-        self._switch_page(2)
-        self._main_scroll.verticalScrollBar().setValue(0)
-        self._show_toast("Draft saved successfully", "Sample moved to Draft List.")
-
-    def _load_saved_sample(self, patient_id):
-        snapshot = next((p for p in self._saved_patients if p['id'] == patient_id), None)
-        if snapshot:
-            p = snapshot.get('patient', {})
-            log_record_loaded(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'), 'sample')
-            self._load_snapshot(snapshot)
-
-    def _view_saved_sample_result(self, patient_id):
-        snapshot = next((p for p in self._saved_patients if p['id'] == patient_id), None)
-        if snapshot:
-            p = snapshot.get('patient', {})
-            log_record_loaded(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'), 'view_result')
-            self._show_snapshot_result(snapshot)
-
-    def _print_saved_sample(self, patient_id):
-        snapshot = next((p for p in self._saved_patients if p['id'] == patient_id), None)
-        if snapshot:
-            p = snapshot.get('patient', {})
-            log_report_printed(p.get('pid', 'N/A'), p.get('name', 'N/A'))
-            self._open_report_in_browser(snapshot)
-
-    def _load_draft(self, patient_id):
-        snapshot = next((p for p in self._drafts if p['id'] == patient_id), None)
-        if not snapshot:
-            return
-        p = snapshot.get('patient', {})
-        log_record_loaded(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'), 'draft')
-        self._load_snapshot(snapshot)
-
-    def _load_snapshot(self, snapshot):
-        if hasattr(self, '_report_snapshot'):
-            delattr(self, '_report_snapshot')
-        self._active_record_id = snapshot.get('id')
-        self._active_record_source = snapshot.get('record_type', 'sample')
-        self._scheme_rows_cache = {}
-        # Restore sampling mode (multi / direct)
-        saved_mode = snapshot.get('sampling_mode', 'multi')
-        self._switch_sampling_mode(saved_mode)
-        if saved_mode == 'direct':
-            self._toggle_direct.setChecked(True)
-            self._direct_auc_edit.setText(snapshot.get('direct_auc', ''))
-        else:
-            self._toggle_multi.setChecked(True)
-        self._set_duration_options(snapshot.get('duration_options', self._global_duration_options), selected=snapshot.get('scheme', 4))
-        patient = snapshot.get('patient', {})
-        self.f_name.setText(patient.get('name', '') if patient.get('name') != 'N/A' else '')
-        self.f_age.setText(patient.get('age', '') if patient.get('age') != 'N/A' else '')
-        invoice_number = patient.get('invoice_number', patient.get('hosp_id', ''))
-        report_number = patient.get('report_number', patient.get('ward', ''))
-        self.f_hosp_no.setText(invoice_number if invoice_number != 'N/A' else '')
-        self.f_report_no.setText(report_number if report_number != 'N/A' else '')
-        self.f_referred_by.setText(patient.get('dept', '') if patient.get('dept') != 'N/A' else '')
-        self.f_phone.setText(patient.get('phone', '') if patient.get('phone') != 'N/A' else '')
-
-        invoice_date = QDate.fromString(patient.get('invoice_date', patient.get('weight', '')), "dd.MM.yyyy")
-        if invoice_date.isValid():
-            self.f_invoice_date.setDate(invoice_date)
-        delivery_date = QDate.fromString(patient.get('delivery_date', ''), "dd.MM.yyyy")
-        if delivery_date.isValid():
-            self.f_delivery_date.setDate(delivery_date)
-
-        sex_value = patient.get('sex', '').strip()
-        sex_index = self.f_sex.findText(sex_value) if sex_value else 0
-        self.f_sex.setCurrentIndex(sex_index if sex_index >= 0 else 0)
-        self.f_diag.setText(patient.get('diag', 'Post Renal Transplant') if patient.get('diag') != 'N/A' else 'Post Renal Transplant')
-        self.f_drug.setText(patient.get('drug', 'MPA') or 'MPA')
-        self.f_preparation.setText(patient.get('preparation', 'Mycophenolate Mofetil (MMF)'))
-        self.f_dose.setText(patient.get('dose', '540mg - 720mg') if patient.get('dose') != 'N/A' else '')
-        tx_date = QDate.fromString(patient.get('tx_date', ''), "dd.MM.yyyy")
-        self.f_tx_date.setDate(tx_date if tx_date.isValid() else None)
-        self._update_tx_duration()
-        dose_dt_text = patient.get('dose_dt', '')
-        dose_dt = QDateTime.fromString(dose_dt_text, "dd.MM.yyyy 'at' hh:mmAP")
-        if not dose_dt.isValid():
-            dose_dt = QDateTime.fromString(dose_dt_text, "dd.MM.yy 'at' hh:mmAP")
-        if dose_dt.isValid():
-            self.f_dose_dt.setDateTime(dose_dt)
-        sample_date_text = patient.get('sample_collection_date', '')
-        sample_dt = QDate.fromString(sample_date_text, "dd.MM.yyyy")
-        if not sample_dt.isValid():
-            sample_dt = QDate.fromString(sample_date_text, "dd.MM.yy")
-        if sample_dt.isValid():
-            self.f_sample_collection_date.setDate(sample_dt)
-
-        self.f_med.clear_selection()
-        meds = patient.get('med', '')
-        if meds and meds != 'N/A':
-            for m in [m.strip() for m in meds.split(',') if m.strip()]:
-                self.f_med.select_med(m)
-        
-        # Restore doctors
-        prep_id = snapshot.get('prepared_by_id')
-        check_id = snapshot.get('checked_by_id')
-        self._refresh_doctor_combos(select_prep_id=prep_id, select_check_id=check_id)
-
-        scheme = snapshot.get('scheme', 4)
-        rows_payload = snapshot.get('sample_rows')
-        if rows_payload:
-            self._current_scheme = scheme
-            self.sample_table.set_rows_payload(rows_payload)
-            self._scheme_rows_cache[scheme] = rows_payload
-            self.trough_edit.setText(snapshot.get('trough', ''))
-        else:
-            times = snapshot.get('times', [])
-            concs = snapshot.get('concs', [])
-            if times:
-                if times[0] == 0 and concs:
-                    self.trough_edit.setText("" if concs[0] is None else str(concs[0]))
-                    self.sample_table.set_data(times[1:], concs[1:])
-                    self._scheme_rows_cache[scheme] = self.sample_table.get_rows_payload()
-                else:
-                    self.trough_edit.clear()
-                    self.sample_table.set_data(times, concs)
-                    self._scheme_rows_cache[scheme] = self.sample_table.get_rows_payload()
-            else:
-                self.trough_edit.clear()
-                self._populate_table(scheme)
-
-        if snapshot.get('pk'):
-            times = snapshot.get('times', [])
-            concs = snapshot.get('concs', [])
-            self._last_pk = snapshot['pk']
-            self._last_times = times
-            self._last_concs = concs
-            self._last_interp = snapshot.get('interp', 'N/A')
-            self._last_drug = canonical_drug_name(patient.get('drug', 'MPA'))
-        else:
-            for attr in ['_last_pk', '_last_times', '_last_concs', '_last_interp', '_last_drug']:
-                if hasattr(self, attr):
-                    delattr(self, attr)
-        self._loaded_form_signature = self._form_signature()
-        self._update_action_buttons()
-        self._switch_page(0)
-        self._switch_report_step(1)
-
-    def _delete_saved_patient(self, patient_id):
-        snapshot = next((p for p in self._saved_patients if p['id'] == patient_id), None)
-        dlg = ConfirmActionModal(
-            "Delete Sample",
-            "Are you sure you want to delete this sample from the Sample List?",
-            confirm_label="Yes",
-            cancel_label="No",
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        if snapshot:
-            p = snapshot.get('patient', {})
-            log_record_deleted(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'))
-        delete_record(patient_id)
-        self._load_saved_patients()
-        self._refresh_patients_list()
-        self._show_toast("Deleted successfully", "Sample removed from Sample List.")
-
-    def _delete_draft(self, patient_id):
-        snapshot = next((p for p in self._drafts if p['id'] == patient_id), None)
-        dlg = ConfirmActionModal(
-            "Delete Draft",
-            "Are you sure you want to delete this draft from the Draft List?",
-            confirm_label="Yes",
-            cancel_label="No",
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        if snapshot:
-            p = snapshot.get('patient', {})
-            log_record_deleted(patient_id, p.get('pid', 'N/A'), p.get('name', 'N/A'))
-        delete_record(patient_id)
-        self._load_saved_patients()
-        self._refresh_patients_list()
-        self._show_toast("Deleted successfully", "Draft removed from Draft List.")
-
-    def _show_snapshot_result(self, snapshot):
-        pk = snapshot.get('pk')
-        if not pk:
-            QMessageBox.information(self, "No Report Yet", "Generate a report for this sample first.")
-            return
-        self._reset_to_sample_list_on_result_close = False
-        self._report_snapshot = snapshot
-        self._last_pk = pk
-        self._last_times = snapshot.get('times', [])
-        self._last_concs = snapshot.get('concs', [])
-        self._last_interp = snapshot.get('interp', 'N/A')
-        self._last_drug = canonical_drug_name(snapshot.get('patient', {}).get('drug', 'MPA'))
-        self._apply_results(pk, self._last_interp)
-
-    def _capture_report_graph_uri(self):
-        if self._results_dialog is None:
-            return None
-        buf = BytesIO()
-        self._results_dialog.canvas.fig.savefig(buf, format="png", facecolor="white", bbox_inches="tight")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
-    def _save_report_file(self, snapshot, graph_uri=None):
-        try:
-            from report_print import build_report_html
-            from app_paths import reports_dir as get_reports_dir
-            reports_dir = get_reports_dir()
-            report_path = reports_dir / f"{snapshot['id']}.html"
-            prep_id = snapshot.get('prepared_by_id')
-            check_id = snapshot.get('checked_by_id')
-            prepared_by = get_doctor_by_id(prep_id) if prep_id else None
-            checked_by = get_doctor_by_id(check_id) if check_id else None
-
-            html = build_report_html(
-                patient=snapshot.get('patient', {}),
-                pk=snapshot.get('pk', {}),
-                interp=snapshot.get('interp', 'N/A'),
-                times=snapshot.get('times', []),
-                concs=snapshot.get('concs', []),
-                prepared_by=prepared_by,
-                checked_by=checked_by,
-                graph_uri=graph_uri,
-            )
-            report_path.write_text(html, encoding="utf-8")
-            snapshot['report_path'] = str(report_path)
-            return str(report_path)
-        except Exception as e:
-            log_error("_save_report_file", e)
-            self._show_toast(
-                "Report file not saved",
-                "Result is saved to the database but the print file could not be written.",
-                tone="error",
-            )
-            return None
-
-    def _open_report_in_browser(self, snapshot):
-        pk = snapshot.get('pk')
-        if not pk:
-            QMessageBox.information(self, "No Report Yet", "Generate a report for this sample first.")
-            return
-        report_path = snapshot.get('report_path')
-        if not report_path or not Path(report_path).exists():
-            # Re-generate it if missing
-            from report_print import build_report_html
-            prep_id = snapshot.get('prepared_by_id')
-            check_id = snapshot.get('checked_by_id')
-            prepared_by = get_doctor_by_id(prep_id) if prep_id else None
-            checked_by = get_doctor_by_id(check_id) if check_id else None
-            
-            html = build_report_html(
-                patient=snapshot.get('patient', {}),
-                pk=snapshot.get('pk', {}),
-                interp=snapshot.get('interp', 'N/A'),
-                times=snapshot.get('times', []),
-                concs=snapshot.get('concs', []),
-                prepared_by=prepared_by,
-                checked_by=checked_by,
-                graph_uri=None # report_print will generate it from data
-            )
-            # Re-determine path if it was empty
-            if not report_path:
-                from app_paths import reports_dir
-                report_path = str(reports_dir() / f"{snapshot['id']}.html")
-                snapshot['report_path'] = report_path
-
-            try:
-                Path(report_path).write_text(html, encoding="utf-8")
-            except Exception:
-                pass
-        
-        if report_path and Path(report_path).exists():
-            webbrowser.open(f"file://{Path(report_path).absolute()}")
-        else:
-            self._show_toast("Error", "Report file not found and could not be regenerated.", tone="error")
-
-    def _apply_results(self, pk, interp):
-        if self._results_dialog is None:
-            self._results_dialog = ResultsDialog(self, print_handler=self._print_report)
-            self._results_dialog.finished.connect(self._on_results_dialog_closed)
-        _times = getattr(self, '_last_times', None)
-        _concs = getattr(self, '_last_concs', None)
-        self._results_dialog.apply_results(pk, interp, times=_times, concs=_concs)
-        has_data = bool(_times and _concs)
-        self._results_dialog.set_graph_visible(has_data)
-        if has_data:
-            drug_name = getattr(self, '_last_drug', 'MPA')
-            self._results_dialog.plot_data(_times, _concs, drug=drug_name)
-        self._results_dialog.show()
-        self._results_dialog.raise_()
-        self._results_dialog.activateWindow()
-
-    def _on_results_dialog_closed(self, _result):
-        if not getattr(self, '_reset_to_sample_list_on_result_close', False):
-            return
-        self._clear_form_state(close_results=False)
-        if hasattr(self, '_report_snapshot'):
-            delattr(self, '_report_snapshot')
-        for attr in ['_last_pk', '_last_times', '_last_concs', '_last_interp', '_last_drug']:
-            if hasattr(self, attr):
-                delattr(self, attr)
-        self._switch_page(1)
-        if hasattr(self, '_main_scroll'):
-            self._main_scroll.verticalScrollBar().setValue(0)
-        self._reset_to_sample_list_on_result_close = False
-
-    # ──────────────────────────────────────
-    # Calculate
-    # ──────────────────────────────────────
-    def _calculate(self):
-        # Phone validation
-        phone = self.f_phone.text().strip()
-        if phone:
-            if not phone.isdigit() or len(phone) != 11:
-                self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
-                return
-
-        if hasattr(self, '_report_snapshot'):
-            delattr(self, '_report_snapshot')
-
-        drug = canonical_drug_name(self.f_drug.text().strip() or 'MPA')
-
-        # ── Direct AUC mode ───────────────────────────────────────────
-        if getattr(self, '_sampling_mode', 'multi') == 'direct':
-            try:
-                auc_val = float(self._direct_auc_edit.text().strip())
-                if auc_val <= 0:
-                    raise ValueError
-            except ValueError:
-                QMessageBox.warning(self, "Invalid Value",
-                                    "Please enter a valid AUC value (mg·h/L).")
-                return
-            pk = {
-                'auc_0_last': auc_val,
-                'auc_0_12':   auc_val,
-                'auc_lss':    auc_val,
-                'lss_equation': 'Direct input (mg·h/L)',
-                'lambda_z':   None,
-                't_half':     None,
-                'r_squared':  None,
-                't_last':     0.0,
-                'c_trough':   None,
-                'c_last':     None,
-            }
-            interp, _ = interpret_result(drug, auc_val)
-            self._last_pk    = pk
-            self._last_times = []
-            self._last_concs = []
-            self._last_interp = interp
-            self._last_drug  = drug
-            p = self._patient_payload()
-            log_report_generated(p.get('pid', 'N/A'), p.get('name', 'N/A'), drug, auc_val)
-            self._apply_results(pk, interp)
-            snapshot = self._snapshot_payload()
-            existing_id = getattr(self, '_active_record_id', None)
-            if existing_id:
-                snapshot['id'] = existing_id
-            # Save report file (no graph for direct AUC mode)
-            saved_path = self._save_report_file(snapshot, graph_uri=None)
-            snapshot['report_path'] = saved_path or ''
-            if getattr(self, '_active_record_source', None) == 'draft' and existing_id:
-                delete_record(existing_id)
-            save_record(snapshot, 'sample')
-            self._report_snapshot = snapshot
-            self._active_record_id = snapshot['id']
-            self._active_record_source = 'sample'
-            self._loaded_form_signature = self._form_signature()
-            self._load_saved_patients()
-            self._reset_list_view(getattr(self, 'sample_list_card', None))
-            self._refresh_patients_list()
-            self._reset_to_sample_list_on_result_close = True
-            return
-        # ─────────────────────────────────────────────────────────────
-
-        times, concs = self._read_table(skip_empty=False)
-
-        if times is None or len(times) < 3:
-            QMessageBox.warning(
-                self, "Insufficient Data",
-                "Please enter at least the trough + 2 post-dose concentrations."
-            )
-            return
-        if any(b <= a for a, b in zip(times, times[1:])):
-            QMessageBox.warning(
-                self,
-                "Invalid Sample Times",
-                "Sample times must be strictly increasing without duplicates.",
-            )
-            return
-        pk = calculate_auc_full(times, concs)
-
-        # LSS estimate — only use when EXACTLY 3 time points are provided
-        # and they match the LSS equation requirements (C₀, C₀.₅, C₂).
-        # When more points are available, trapezoidal AUC is more accurate.
-        lss = None
-        if len(times) == 3:
-            rounded_times = set(round(t, 1) for t in times)
-            if rounded_times == {0.0, 0.5, 2.0}:
-                lss = calculate_lss_auc(times, concs, cni=drug)
-        
-        if lss and drug.upper() in lss['equation_label'].upper():
-            pk['auc_lss']       = lss['auc_lss']
-            pk['lss_equation']  = lss['equation_label']
-            pk['lss_r2']        = lss['r2']
-
-        # Interpretation — use auc_lss when available (exactly 3-point LSS),
-        # fall back to auc_0_12 (trapezoidal extrapolation) for all other cases.
-        interp_value = pk.get('auc_lss') if pk.get('auc_lss') is not None else pk['auc_0_12']
-        interp, _ = interpret_result(drug, interp_value)
-        self._last_pk = pk
-        self._last_times = times
-        self._last_concs = concs
-        self._last_interp = interp
-        self._last_drug = drug
-        p = self._patient_payload()
-        log_report_generated(
-            p.get('pid', 'N/A'), p.get('name', 'N/A'),
-            drug, pk.get('auc_0_12'),
-        )
-        self._apply_results(pk, interp)
-
-        # Auto-save after generating report
-        snapshot = self._snapshot_payload()
-        existing_id = getattr(self, '_active_record_id', None)
-        was_updating = getattr(self, '_active_record_source', None) == 'sample' and bool(existing_id)
-        if existing_id:
-            snapshot['id'] = existing_id  # reuse id to replace, not duplicate
-        saved_path = self._save_report_file(
-            snapshot,
-            graph_uri=self._capture_report_graph_uri(),
-        )
-        snapshot['report_path'] = saved_path or ''
-        if getattr(self, '_active_record_source', None) == 'draft' and existing_id:
-            delete_record(existing_id)
-        save_record(snapshot, 'sample')
-        self._report_snapshot = snapshot
-        self._active_record_id = snapshot['id']
-        self._active_record_source = 'sample'
-        self._loaded_form_signature = self._form_signature()
-        self._load_saved_patients()
-        self._reset_list_view(getattr(self, 'sample_list_card', None))
-        self._refresh_patients_list()
-        if self._results_dialog is not None:
-            if was_updating:
-                self._results_dialog.show_toast("Report updated", "Generated result has been updated successfully.")
-            else:
-                self._results_dialog.show_toast("Report generated", "Generated result has been saved successfully.")
-        self._reset_to_sample_list_on_result_close = True
-
-    # ──────────────────────────────────────
-    # Print / PDF
-    # ──────────────────────────────────────
-    def _print_report(self):
-        if not hasattr(self, '_last_pk'):
-            return
-        if hasattr(self, '_report_snapshot'):
-            self._open_report_in_browser(self._report_snapshot)
-            self._switch_page(1)
-            if hasattr(self, '_main_scroll'):
-                self._main_scroll.verticalScrollBar().setValue(0)
-            return
-        snapshot = self._snapshot_payload()
-        existing_id = getattr(self, '_active_record_id', None)
-        if existing_id:
-            snapshot['id'] = existing_id
-        report_path = self._save_report_file(
-            snapshot,
-            graph_uri=self._capture_report_graph_uri(),
-        )
-        webbrowser.open(Path(report_path).as_uri())
-        self._switch_page(1)
-        if hasattr(self, '_main_scroll'):
-            self._main_scroll.verticalScrollBar().setValue(0)
-
-    # ──────────────────────────────────────
-    # Reset
-    # ──────────────────────────────────────
-    def _clear_form_state(self, close_results=True):
-        self._active_record_id = None
-        self._active_record_source = None
-        self._loaded_form_signature = None
-        self._reset_to_sample_list_on_result_close = False
-        self._current_scheme = None
-        self._scheme_rows_cache = {}
-        default_duration = self._global_duration_options[0] if self._global_duration_options else 4
-        self._set_duration_options(self._global_duration_options, selected=default_duration)
-        # Reset sampling mode to multi-point
-        self._switch_sampling_mode('multi')
-        self._toggle_multi.setChecked(True)
-        self._direct_auc_edit.clear()
-        if close_results and hasattr(self, '_report_snapshot'):
-            delattr(self, '_report_snapshot')
-        for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by,
-                     self.f_dose,
-                     self.f_diag, self.trough_edit, self.f_phone]:
-            edit.clear()
-        self.f_drug.setText("MPA")
-        self.f_preparation.setText("Mycophenolate Mofetil (MMF)")
-        self.f_diag.setText("Post Renal Transplant")
-        self.f_sex.setCurrentIndex(0)
-        self.f_med.clear_selection()
-        self.f_tx_date.setDate(None)
-        self.f_invoice_date.setDate(QDate.currentDate())
-        self.f_delivery_date.setDate(QDate.currentDate())
-        self.f_dose_dt.setDateTime(QDateTime.currentDateTime())
-        self.f_sample_collection_date.setDate(QDate.currentDate())
-        self._populate_table(default_duration)
-        self._scheme_rows_cache[default_duration] = self.sample_table.get_rows_payload()
-        self._update_action_buttons()
-        self._switch_report_step(0)
-        if close_results and self._results_dialog is not None:
-            self._results_dialog.close()
-        if close_results:
-            for attr in ['_last_pk', '_last_times', '_last_concs', '_last_interp', '_last_drug']:
-                if hasattr(self, attr):
-                    delattr(self, attr)
-
-    def _reset(self):
-        self._clear_form_state()
-        self._switch_page(0)
-        if hasattr(self, '_main_scroll'):
-            self._main_scroll.verticalScrollBar().setValue(0)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper Modals for Doctors
-# ─────────────────────────────────────────────────────────────────────────────
-
-class DoctorManagementModal(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Manage Signatories")
-        self.setFixedWidth(550)
-        self.setFixedHeight(600)
-        self.setModal(True)
-        self.setStyleSheet(f"""
-            QDialog {{
-                background: white;
-                border-radius: 20px;
-            }}
-        """)
-        
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        
-        # ── Top colored banner ──────────────────
-        banner = QFrame()
-        banner.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #1E293B, stop:1 #334155);
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
-        """)
-        banner_lay = QHBoxLayout(banner)
-        banner_lay.setContentsMargins(24, 20, 24, 20)
-        banner_lay.setSpacing(14)
-
-        icon_lbl = QLabel()
-        icon_lbl.setFixedSize(40, 40)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.account-cog", color="white").pixmap(22, 22))
-        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.15); border-radius: 20px;")
-        banner_lay.addWidget(icon_lbl)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(4)
-        t = QLabel("Manage Signatories")
-        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
-        s = QLabel("Configure doctors and technologists for reports")
-        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.7); background: transparent;")
-        title_col.addWidget(t)
-        title_col.addWidget(s)
-        banner_lay.addLayout(title_col)
-        banner_lay.addStretch()
-        
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background: rgba(255,255,255,0.1); color: white;
-                border: none; border-radius: 15px; font-size: 18px; font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(255,255,255,0.2); }
-        """)
-        close_btn.clicked.connect(self.reject)
-        banner_lay.addWidget(close_btn)
-        
-        lay.addWidget(banner)
-        
-        # ── Body ────────────────────────────────
-        body = QWidget()
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(24, 24, 24, 24)
-        body_lay.setSpacing(18)
-        
-        self.list_widget = QListWidget()
-        self.list_widget.setSpacing(6)
-        self.list_widget.setStyleSheet(f"""
-            QListWidget {{
-                background: #F8FAFC;
-                border: 1.5px solid #E2E8F0;
-                border-radius: 16px;
-                padding: 10px;
-                outline: none;
-            }}
-            QListWidget::item {{
-                background: white;
-                border: 1px solid #F1F5F9;
-                border-radius: 12px;
-                padding: 12px;
-                color: {TEXT_CLR};
-                margin-bottom: 2px;
-            }}
-            QListWidget::item:hover {{
-                background: #F1F5F9;
-            }}
-            QListWidget::item:selected {{
-                background: #EFF6FF;
-                border: 1.5px solid #3B82F6;
-                color: #2563EB;
-            }}
-        """)
-        body_lay.addWidget(self.list_widget)
-        
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-        
-        add_btn = QPushButton("Add New Signatory")
-        add_btn.setFixedHeight(40)
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background: #16A34A; color: white; border: none; border-radius: 10px;
-                padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #15803D; }
-        """)
-        add_btn.clicked.connect(self._add_doctor)
-        
-        edit_btn = QPushButton("Edit")
-        edit_btn.setFixedHeight(40)
-        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.setStyleSheet("""
-            QPushButton {
-                background: #F1F5F9; color: #475569; border: 1.5px solid #E2E8F0;
-                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #E2E8F0; }
-        """)
-        edit_btn.clicked.connect(self._edit_doctor)
-        
-        del_btn = QPushButton("Delete")
-        del_btn.setFixedHeight(40)
-        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        del_btn.setStyleSheet("""
-            QPushButton {
-                background: #FEF2F2; color: #DC2626; border: 1.5px solid #FEE2E2;
-                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #DC2626; color: white; border-color: #B91C1C; }
-        """)
-        del_btn.clicked.connect(self._delete_doctor)
-        
-        btn_row.addWidget(add_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(edit_btn)
-        btn_row.addWidget(del_btn)
-        body_lay.addLayout(btn_row)
-        
-        lay.addWidget(body)
-        
-        self._refresh_list()
-        
-    def _refresh_list(self):
-        self.list_widget.clear()
-        doctors = load_doctors()
-        for d in reversed(doctors):
-            item = QListWidgetItem(f"{d['name']} ({d['designation'] or 'No designation'})")
-            item.setData(Qt.ItemDataRole.UserRole, d)
-            self.list_widget.addItem(item)
-            
-    def _add_doctor(self):
-        dlg = DoctorEditModal(parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_list()
-            
-    def _edit_doctor(self):
-        item = self.list_widget.currentItem()
-        if not item: return
-        doctor = item.data(Qt.ItemDataRole.UserRole)
-        dlg = DoctorEditModal(doctor, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_list()
-            
-    def _delete_doctor(self):
-        item = self.list_widget.currentItem()
-        if not item: return
-        doctor = item.data(Qt.ItemDataRole.UserRole)
-        dlg = ConfirmActionModal(
-            "Delete Signatory",
-            f"Are you sure you want to delete \"{doctor['name']}\" from the Signatory List?",
-            confirm_label="Yes",
-            cancel_label="No",
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        delete_doctor(doctor['id'])
-        self._refresh_list()
-
-from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
-
-class DoctorEditModal(QDialog):
-    MAX_SIGNATURE_SIZE_BYTES = 2 * 1024 * 1024
-
-    def __init__(self, doctor=None, parent=None):
-        super().__init__(parent)
-        self.doctor = doctor
-        self.setWindowTitle("Add Signatory" if not doctor else "Edit Signatory")
-        self.setFixedWidth(800)
-        self.setModal(True)
-        self.setStyleSheet("QDialog { background: white; border-radius: 20px; }")
-        
-        # Toast Message for validation
-        self._toast = ToastMessage(self)
-        self._toast.hide()
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        
-        # ── Top colored banner ──────────────────
-        banner = QFrame()
-        banner.setStyleSheet(f"""
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #7C3AED, stop:1 #8B5CF6);
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
-        """)
-        banner_lay = QHBoxLayout(banner)
-        banner_lay.setContentsMargins(24, 20, 24, 20)
-        banner_lay.setSpacing(14)
-
-        icon_lbl = QLabel()
-        icon_lbl.setFixedSize(40, 40)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.account-plus" if not doctor else "mdi6.account-edit", color="white").pixmap(22, 22))
-        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.2); border-radius: 20px;")
-        banner_lay.addWidget(icon_lbl)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(4)
-        t = QLabel("Add New Signatory" if not doctor else "Edit Signatory Details")
-        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
-        s = QLabel("Enter signatory name, description, phone and signature")
-        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.75); background: transparent;")
-        title_col.addWidget(t)
-        title_col.addWidget(s)
-        banner_lay.addLayout(title_col)
-        banner_lay.addStretch()
-        lay.addWidget(banner)
-
-        # ── Body ────────────────────────────────
-        body = QWidget()
-        body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(32, 28, 32, 28)
-        body_lay.setSpacing(20)
-        
-        # Row 1: Name & Type
-        row1 = QHBoxLayout()
-        row1.setSpacing(24)
-
-        # Name
-        name_sec = QVBoxLayout()
-        name_sec.setSpacing(8)
-        name_sec.addWidget(small_label("FULL NAME", color="#64748B", size=10, bold=True))
-        self.name_edit = QLineEdit(doctor['name'] if doctor else "")
-        self.name_edit.setPlaceholderText("e.g. Dr. John Doe")
-        self.name_edit.setStyleSheet(self._input_style())
-        name_sec.addWidget(self.name_edit)
-        row1.addLayout(name_sec, 3)
-
-        # Type
-        type_sec = QVBoxLayout()
-        type_sec.setSpacing(8)
-        type_sec.addWidget(small_label("SIGNATORY TYPE", color="#64748B", size=10, bold=True))
-        
-        import tempfile, os
-        _arrow_path = os.path.join(tempfile.gettempdir(), "tdm_staff_arrow_down.png")
-        qta.icon("mdi6.chevron-down", color="#64748B").pixmap(14, 14).save(_arrow_path)
-        _arrow_path = _arrow_path.replace("\\", "/")
-        
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(["Doctor", "Technologist"])
-        self.type_combo.setStyleSheet(self._input_style(_arrow_path))
-        if doctor and doctor.get('type'):
-            self.type_combo.setCurrentText(doctor['type'].capitalize())
-        type_sec.addWidget(self.type_combo)
-        row1.addLayout(type_sec, 2)
-        body_lay.addLayout(row1)
-        
-        # Row 2: Description & Phone
-        row2 = QHBoxLayout()
-        row2.setSpacing(24)
-
-        # Description
-        desc_sec = QVBoxLayout()
-        desc_sec.setSpacing(8)
-        desc_sec.addWidget(small_label("DESCRIPTION", color="#64748B", size=10, bold=True))
-        self.desc_edit = QPlainTextEdit()
-        self.desc_edit.setPlainText(doctor['designation'] if doctor else "")
-        self.desc_edit.setPlaceholderText("e.g. Degrees, Department...")
-        self.desc_edit.setStyleSheet(self._input_style())
-        self.desc_edit.setFixedHeight(120)
-        desc_sec.addWidget(self.desc_edit)
-        row2.addLayout(desc_sec, 4)
-
-        # Phone Number
-        phone_sec = QVBoxLayout()
-        phone_sec.setSpacing(8)
-        phone_label = QHBoxLayout()
-        phone_label.setSpacing(4)
-        phone_label.addWidget(small_label("PHONE NUMBER", color="#64748B", size=10, bold=True))
-        req_star = QLabel("*")
-        req_star.setStyleSheet("color: #DC2626; font-size: 14px; font-weight: bold; background: transparent;")
-        phone_label.addWidget(req_star)
-        phone_label.addStretch()
-        phone_sec.addLayout(phone_label)
-        
-        self.phone_edit = QLineEdit(doctor.get('phone', '') if doctor else "")
-        self.phone_edit.setPlaceholderText("e.g. 01XXXXXXXXX")
-        self.phone_edit.setMaxLength(11)
-        self.phone_edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self.phone_edit))
-        self.phone_edit.setStyleSheet(self._input_style())
-        phone_sec.addWidget(self.phone_edit)
-        phone_sec.addStretch() # Push to top
-        row2.addLayout(phone_sec, 3)
-        
-        body_lay.addLayout(row2)
-        
-        # Signature Section
-        sig_sec = QVBoxLayout()
-        sig_sec.setSpacing(10)
-        sig_sec.addWidget(small_label("DIGITAL SIGNATURE", color="#64748B", size=10, bold=True))
-        
-        sig_row = QHBoxLayout()
-        sig_row.setSpacing(16)
-
-        sig_box = QFrame()
-        sig_box.setStyleSheet("background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 12px;")
-        sig_box_lay = QVBoxLayout(sig_box)
-        sig_box_lay.setContentsMargins(8, 8, 8, 8)
-        
-        self.sig_label = QLabel()
-        self.sig_label.setFixedSize(280, 100)
-        self.sig_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.sig_label.setStyleSheet("background: transparent; color: #94A3B8; font-size: 11px;")
-        self.sig_path = doctor['signature_path'] if doctor else None
-        self._update_sig_preview()
-        sig_box_lay.addWidget(self.sig_label)
-        sig_row.addWidget(sig_box, 2)
-
-        sig_actions = QVBoxLayout()
-        sig_actions.setSpacing(10)
-
-        upload_btn = QPushButton("Upload Signature")
-        upload_btn.setFixedHeight(46)
-        upload_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        upload_btn.setIcon(qta.icon("mdi6.upload", color="#2563EB"))
-        upload_btn.setStyleSheet("""
-            QPushButton {
-                background: #EFF6FF; color: #2563EB; border: 1.5px solid #BFDBFE;
-                border-radius: 12px; padding: 8px; font-weight: bold; font-size: 13px;
-            }
-            QPushButton:hover { background: #DBEAFE; }
-        """)
-        upload_btn.clicked.connect(self._upload_sig)
-        sig_actions.addWidget(upload_btn)
-
-        self.remove_sig_btn = QPushButton("Remove Signature")
-        self.remove_sig_btn.setFixedHeight(46)
-        self.remove_sig_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.remove_sig_btn.setIcon(qta.icon("mdi6.close", color="#DC2626"))
-        self.remove_sig_btn.setStyleSheet("""
-            QPushButton {
-                background: #FEF2F2; color: #DC2626; border: 1.5px solid #FECACA;
-                border-radius: 12px; padding: 8px; font-weight: bold; font-size: 13px;
-            }
-            QPushButton:hover { background: #FEE2E2; }
-        """)
-        self.remove_sig_btn.clicked.connect(self._remove_sig)
-        self.remove_sig_btn.setVisible(bool(self.sig_path))
-        sig_actions.addWidget(self.remove_sig_btn)
-        sig_actions.addStretch()
-        sig_row.addLayout(sig_actions, 1)
-        
-        sig_sec.addLayout(sig_row)
-        sig_note = QLabel("Note: Upload PNG, JPG, JPEG, or BMP signature image up to 2 MB.")
-        sig_note.setWordWrap(True)
-        sig_note.setStyleSheet("color: #64748B; font-size: 11px; background: transparent;")
-        sig_sec.addWidget(sig_note)
-        body_lay.addLayout(sig_sec)
-        
-        body_lay.addSpacing(10)
-        
-        # Buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(42)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: #FEE2E2; color: #B91C1C;
-                border: 1.5px solid #FCA5A5; border-radius: 10px;
-                font-size: 13px; padding: 0 24px;
-            }
-            QPushButton:hover {
-                background: #DC2626; color: white;
-                border: 1.5px solid #B91C1C;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        
-        save_btn = QPushButton("Save Details")
-        save_btn.setFixedHeight(42)
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background: #7C3AED; color: white;
-                border: none; border-radius: 10px;
-                font-size: 13px; font-weight: bold; padding: 0 24px;
-            }
-            QPushButton:hover { background: #6D28D9; }
-        """)
-        save_btn.clicked.connect(self._save)
-        
-        btn_row.addStretch()
-        btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(save_btn)
-        body_lay.addLayout(btn_row)
-        
-        lay.addWidget(body)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if hasattr(self, '_toast'):
-            width = 300
-            self._toast.setFixedWidth(width)
-            self._toast.move(self.width() - width - 24, 24)
-
-    def _show_error(self, title, msg):
-        self._toast.show_message(title, msg, tone="warning")
-
-    def _input_style(self, arrow_path=None):
-        style = f"""
-            QLineEdit, QPlainTextEdit, QComboBox {{
-                background: #F7FAFE;
-                border: 1.5px solid {BORDER};
-                border-radius: 12px;
-                padding: 10px 14px;
-                font-size: 14px;
-                color: {TEXT_CLR};
-            }}
-            QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{
-                border-color: {BLUE};
-                background: white;
-            }}
-            QComboBox {{
-                padding-right: 40px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 34px;
-                border-top-right-radius: 12px;
-                border-bottom-right-radius: 12px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #64748B;
-                margin-top: 2px;
-            }}
-        """
-        if arrow_path:
-            style += f"""
-                QComboBox::down-arrow {{
-                    image: url("{arrow_path}");
-                    width: 14px;
-                    height: 14px;
-                    border: none;
-                }}
-            """
-        
-        style += f"""
-            QComboBox QAbstractItemView {{
-                background: white;
-                border: 1px solid {BORDER};
-                selection-background-color: #EFF6FF;
-                selection-color: {BLUE};
-                outline: none;
-            }}
-        """
-        return style
-        
-    def _upload_sig(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Signature Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
-        if file_path:
-            try:
-                file_size = Path(file_path).stat().st_size
-            except OSError:
-                self._show_error("File Error", "Unable to read the selected signature file.")
-                return
-            if file_size > self.MAX_SIGNATURE_SIZE_BYTES:
-                self._show_error("File Too Large", "Signature image must be 2 MB or smaller.")
-                return
-            # Copy to app signatures dir
-            from app_paths import ensure_data_dirs
-            import shutil
-            sig_dir = ensure_data_dirs() / "signatures"
-            ext = Path(file_path).suffix
-            dest_name = f"sig_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
-            dest_path = sig_dir / dest_name
-            try:
-                shutil.copy2(file_path, dest_path)
-                self.sig_path = str(dest_path)
-                self._update_sig_preview()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to copy signature: {e}")
-
-    def _remove_sig(self):
-        self.sig_path = None
-        self._update_sig_preview()
-                
-    def _update_sig_preview(self):
-        if self.sig_path and Path(self.sig_path).exists():
-            pix = QPixmap(self.sig_path)
-            self.sig_label.setPixmap(pix.scaled(self.sig_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            self.sig_label.setText("")
-        else:
-            self.sig_label.setPixmap(QPixmap())
-            self.sig_label.setText("No Signature Uploaded")
-        if hasattr(self, 'remove_sig_btn'):
-            self.remove_sig_btn.setVisible(bool(self.sig_path))
-            
-    def _save(self):
-        name = self.name_edit.text().strip()
-        desc = self.desc_edit.toPlainText().strip()
-        type_str = self.type_combo.currentText().lower()
-        phone = self.phone_edit.text().strip()
-        
-        if not name:
-            self._show_error("Name Required", "Please enter signatory name.")
-            return
-            
-        if not phone:
-            self._show_error("Phone Required", "Please enter phone number.")
-            return
-            
-        if not phone.isdigit() or len(phone) != 11:
-            self._show_error("Invalid Phone", "Please enter a valid 11-digit phone number.")
-            return
-
-        # Uniqueness check
-        from database import is_doctor_phone_exists
-        if is_doctor_phone_exists(phone, exclude_id=self.doctor['id'] if self.doctor else None):
-            self._show_error("Duplicate Phone", "This phone number is already registered.")
-            return
-
-        if self.doctor:
-            update_doctor(self.doctor['id'], name, desc, self.sig_path, type=type_str, phone=phone)
-        else:
-            add_doctor(name, desc, self.sig_path, type=type_str, phone=phone)
-        self.accept()

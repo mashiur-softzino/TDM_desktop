@@ -4,16 +4,10 @@ TDM Report — Database layer (PostgreSQL)
 
 import json
 import os
-import random
-import string
-from pathlib import Path
 from datetime import datetime
 
 import psycopg2
 import psycopg2.extras
-
-from app_paths import ensure_data_dirs
-from db_config import get_db_url
 
 DEFAULT_MEDICATIONS_SEED = [
     "Tacrolimus (TAC)", "Cyclosporine (CsA)", "Mycophenolate (MPA)",
@@ -32,7 +26,7 @@ DEFAULT_MEDICATIONS_SEED = [
 # ─────────────────────────────────────────
 
 class _ConnWrapper:
-    """Thin wrapper around a psycopg2 connection that mimics the SQLite interface."""
+    """Thin wrapper around a psycopg2 connection."""
 
     def __init__(self, conn):
         self._conn = conn
@@ -46,7 +40,7 @@ class _ConnWrapper:
         cur = self._conn.cursor()
         for stmt in sql.split(';'):
             stmt = stmt.strip()
-            if stmt and not stmt.upper().startswith('PRAGMA'):
+            if stmt:
                 cur.execute(stmt)
         cur.close()
 
@@ -112,15 +106,6 @@ def restore_latest_database_backup() -> None:
 # Schema
 # ─────────────────────────────────────────
 
-def _column_exists(conn, table: str, column: str) -> bool:
-    cur = conn.execute(
-        """SELECT column_name FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = %s AND column_name = %s""",
-        (table, column)
-    )
-    return cur.fetchone() is not None
-
-
 def init_db():
     """Create tables if they don't exist."""
     with _connect() as conn:
@@ -141,7 +126,7 @@ def init_db():
                 phone          TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS doctors (
+            CREATE TABLE IF NOT EXISTS signatories (
                 id             SERIAL PRIMARY KEY,
                 name           TEXT NOT NULL,
                 designation    TEXT,
@@ -151,7 +136,7 @@ def init_db():
             );
 
             CREATE TABLE IF NOT EXISTS records (
-                id                     TEXT PRIMARY KEY,
+                id                     SERIAL PRIMARY KEY,
                 patient_id             INTEGER REFERENCES patients(id),
                 record_type            TEXT NOT NULL DEFAULT 'sample',
                 saved_at               TEXT NOT NULL,
@@ -168,20 +153,20 @@ def init_db():
                 co_medications         TEXT,
                 scheme                 INTEGER,
                 trough                 TEXT,
-                prepared_by_id         INTEGER REFERENCES doctors(id),
-                checked_by_id          INTEGER REFERENCES doctors(id)
+                prepared_by_id         INTEGER REFERENCES signatories(id),
+                checked_by_id          INTEGER REFERENCES signatories(id)
             );
 
             CREATE TABLE IF NOT EXISTS sample_points (
                 id            SERIAL PRIMARY KEY,
-                record_id     TEXT             NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+                record_id     INTEGER          NOT NULL REFERENCES records(id) ON DELETE CASCADE,
                 point_order   INTEGER          NOT NULL,
                 time_point    DOUBLE PRECISION NOT NULL,
                 concentration DOUBLE PRECISION NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS pk_results (
-                record_id      TEXT PRIMARY KEY REFERENCES records(id) ON DELETE CASCADE,
+                record_id      INTEGER PRIMARY KEY REFERENCES records(id) ON DELETE CASCADE,
                 auc_0_last     DOUBLE PRECISION,
                 auc_0_12       DOUBLE PRECISION,
                 lambda_z       DOUBLE PRECISION,
@@ -206,7 +191,7 @@ def init_db():
             );
 
             CREATE TABLE IF NOT EXISTS drafts (
-                id                     TEXT PRIMARY KEY,
+                id                     SERIAL PRIMARY KEY,
                 saved_at               TEXT NOT NULL,
                 report_path            TEXT,
                 sampling_mode          TEXT NOT NULL DEFAULT 'multi',
@@ -234,131 +219,25 @@ def init_db():
                 scheme                 INTEGER,
                 trough                 TEXT,
                 phone                  TEXT,
-                prepared_by_id         INTEGER REFERENCES doctors(id),
-                checked_by_id          INTEGER REFERENCES doctors(id)
+                prepared_by_id         INTEGER REFERENCES signatories(id),
+                checked_by_id          INTEGER REFERENCES signatories(id)
             )
         """)
-        if not _column_exists(conn, "doctors", "type"):
-            conn.execute("ALTER TABLE doctors ADD COLUMN type TEXT NOT NULL DEFAULT 'doctor'")
-        if not _column_exists(conn, "doctors", "phone"):
-            conn.execute("ALTER TABLE doctors ADD COLUMN phone TEXT")
-
-        # Migrations for patients
-        if not _column_exists(conn, 'patients', 'pid'):
-            conn.execute("ALTER TABLE patients ADD COLUMN pid TEXT")
-        
-        # Hospital number / Invoice number renames
-        if _column_exists(conn, 'patients', 'hosp_no') and not _column_exists(conn, 'patients', 'invoice_number'):
-            conn.execute("ALTER TABLE patients RENAME COLUMN hosp_no TO invoice_number")
-        elif not _column_exists(conn, 'patients', 'invoice_number'):
-            conn.execute("ALTER TABLE patients ADD COLUMN invoice_number TEXT")
-            
-        if _column_exists(conn, 'patients', 'weight') and not _column_exists(conn, 'patients', 'invoice_date'):
-            conn.execute("ALTER TABLE patients RENAME COLUMN weight TO invoice_date")
-        elif not _column_exists(conn, 'patients', 'invoice_date'):
-            conn.execute("ALTER TABLE patients ADD COLUMN invoice_date TEXT")
-
-        if _column_exists(conn, 'patients', 'ward') and not _column_exists(conn, 'patients', 'report_number'):
-            conn.execute("ALTER TABLE patients RENAME COLUMN ward TO report_number")
-        elif not _column_exists(conn, 'patients', 'report_number'):
-            conn.execute("ALTER TABLE patients ADD COLUMN report_number TEXT")
-
-        if not _column_exists(conn, 'patients', 'delivery_date'):
-            conn.execute("ALTER TABLE patients ADD COLUMN delivery_date TEXT")
-
-        # Migrations for records
-        if not _column_exists(conn, 'records', 'report_path'):
-            conn.execute("ALTER TABLE records ADD COLUMN report_path TEXT")
-        if not _column_exists(conn, 'records', 'sampling_mode'):
-            conn.execute("ALTER TABLE records ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
-        if not _column_exists(conn, 'records', 'direct_auc'):
-            conn.execute("ALTER TABLE records ADD COLUMN direct_auc TEXT")
-        if not _column_exists(conn, 'records', 'sample_rows_json'):
-            conn.execute("ALTER TABLE records ADD COLUMN sample_rows_json TEXT")
-        if not _column_exists(conn, 'records', 'duration_options_json'):
-            conn.execute("ALTER TABLE records ADD COLUMN duration_options_json TEXT")
-        if not _column_exists(conn, 'records', 'prepared_by_id'):
-            conn.execute("ALTER TABLE records ADD COLUMN prepared_by_id INTEGER")
-        if not _column_exists(conn, 'records', 'checked_by_id'):
-            conn.execute("ALTER TABLE records ADD COLUMN checked_by_id INTEGER")
-
-        # Migrations for drafts
-        if not _column_exists(conn, 'drafts', 'report_path'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN report_path TEXT")
-        if not _column_exists(conn, 'drafts', 'sampling_mode'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN sampling_mode TEXT NOT NULL DEFAULT 'multi'")
-        if not _column_exists(conn, 'drafts', 'direct_auc'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN direct_auc TEXT")
-        if not _column_exists(conn, 'drafts', 'sample_rows_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN sample_rows_json TEXT")
-        if not _column_exists(conn, 'drafts', 'duration_options_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN duration_options_json TEXT")
-        if not _column_exists(conn, 'drafts', 'times_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN times_json TEXT")
-        if not _column_exists(conn, 'drafts', 'concs_json'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN concs_json TEXT")
-        
-        # Draft fields renames
-        if _column_exists(conn, 'drafts', 'hosp_no') and not _column_exists(conn, 'drafts', 'invoice_number'):
-            conn.execute("ALTER TABLE drafts RENAME COLUMN hosp_no TO invoice_number")
-        elif not _column_exists(conn, 'drafts', 'invoice_number'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_number TEXT")
-
-        if _column_exists(conn, 'drafts', 'weight') and not _column_exists(conn, 'drafts', 'invoice_date'):
-            conn.execute("ALTER TABLE drafts RENAME COLUMN weight TO invoice_date")
-        elif not _column_exists(conn, 'drafts', 'invoice_date'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN invoice_date TEXT")
-
-        if _column_exists(conn, 'drafts', 'ward') and not _column_exists(conn, 'drafts', 'report_number'):
-            conn.execute("ALTER TABLE drafts RENAME COLUMN ward TO report_number")
-        elif not _column_exists(conn, 'drafts', 'report_number'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN report_number TEXT")
-
-        if not _column_exists(conn, 'drafts', 'delivery_date'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN delivery_date TEXT")
-        if not _column_exists(conn, 'drafts', 'prepared_by_id'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN prepared_by_id INTEGER")
-        if not _column_exists(conn, 'drafts', 'checked_by_id'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN checked_by_id INTEGER")
-
-        # PK results migrations
-        if not _column_exists(conn, 'pk_results', 'auc_lss'):
-            conn.execute("ALTER TABLE pk_results ADD COLUMN auc_lss REAL")
-        if not _column_exists(conn, 'pk_results', 'lss_equation'):
-            conn.execute("ALTER TABLE pk_results ADD COLUMN lss_equation TEXT")
-
-        # Migrations for existing databases
-        for col in ('auc_lss',):
-            if not _column_exists(conn, 'pk_results', col):
-                conn.execute(f"ALTER TABLE pk_results ADD COLUMN {col} DOUBLE PRECISION")
-        for col in ('lss_equation', 'interpretation'):
-            if not _column_exists(conn, 'pk_results', col):
-                conn.execute(f"ALTER TABLE pk_results ADD COLUMN {col} TEXT")
-        if not _column_exists(conn, 'patients', 'phone'):
-            conn.execute("ALTER TABLE patients ADD COLUMN phone TEXT")
-        if not _column_exists(conn, 'drafts', 'phone'):
-            conn.execute("ALTER TABLE drafts ADD COLUMN phone TEXT")
-        if not _column_exists(conn, 'doctors', 'phone'):
-            conn.execute("ALTER TABLE doctors ADD COLUMN phone TEXT")
-
-        conn.commit()
-        _migrate_legacy_drafts(conn)
-
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute(
                 "INSERT INTO medications (name) VALUES (%s) ON CONFLICT DO NOTHING",
                 (med,)
             )
 
-        cur = conn.execute("SELECT count(*) FROM doctors")
+        cur = conn.execute("SELECT count(*) FROM signatories")
         row = cur.fetchone()
         if row and row['count'] == 0:
             conn.execute(
-                "INSERT INTO doctors (name, designation) VALUES (%s, %s)",
+                "INSERT INTO signatories (name, designation) VALUES (%s, %s)",
                 ("Dr. John Doe", "MBBS, MD (Nephrology)")
             )
             conn.execute(
-                "INSERT INTO doctors (name, designation) VALUES (%s, %s)",
+                "INSERT INTO signatories (name, designation) VALUES (%s, %s)",
                 ("Dr. Jane Smith", "MBBS, MS (Transplant Surgery)")
             )
         conn.commit()
@@ -368,13 +247,52 @@ def init_db():
 # Internal helpers
 # ─────────────────────────────────────────
 
-def _generate_pid() -> str:
-    date_str = datetime.now().strftime("%Y%m%d")
-    suffix = ''.join(random.choices(string.digits, k=4))
-    return f"PID-{date_str}-{suffix}"
+def _generate_pid(conn) -> str:
+    date_prefix = datetime.now().strftime("%y%m%d")
+    prefix = f"PID-{date_prefix}"
+    rows = conn.execute(
+        "SELECT pid FROM patients WHERE pid LIKE %s",
+        (f"{prefix}%",),
+    ).fetchall()
+
+    next_serial = 1
+    for row in rows:
+        pid = row.get("pid") or ""
+        suffix = pid.removeprefix(prefix)
+        if not suffix.isdigit():
+            continue
+        next_serial = max(next_serial, int(suffix) + 1)
+
+    return f"{prefix}{next_serial}"
 
 
-def _get_or_create_patient(conn, patient: dict) -> int:
+def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None = None) -> int:
+    if existing_patient_id is not None:
+        row = conn.execute(
+            "SELECT id FROM patients WHERE id = %s", (existing_patient_id,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                """UPDATE patients
+                   SET name = %s, age = %s, sex = %s, invoice_date = %s, report_number = %s,
+                       dept = %s, diagnosis = %s, tx_date = %s, delivery_date = %s, phone = %s
+                   WHERE id = %s""",
+                (
+                    patient.get('name'),
+                    patient.get('age'),
+                    patient.get('sex'),
+                    patient.get('invoice_date'),
+                    patient.get('report_number'),
+                    patient.get('dept'),
+                    patient.get('diag'),
+                    patient.get('tx_date'),
+                    patient.get('delivery_date'),
+                    patient.get('phone'),
+                    row['id'],
+                )
+            )
+            return row['id']
+
     invoice_no = patient.get('invoice_number', '') or ''
     if invoice_no and invoice_no != 'N/A':
         row = conn.execute(
@@ -402,7 +320,7 @@ def _get_or_create_patient(conn, patient: dict) -> int:
             )
             return row['id']
 
-    pid = _generate_pid()
+    pid = _generate_pid(conn)
     cur = conn.execute(
         """INSERT INTO patients
                (pid, invoice_number, name, age, sex, invoice_date, report_number,
@@ -454,6 +372,7 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
 
     snapshot = {
         'id':          record['id'],
+        'patient_db_id': record['patient_id'],
         'saved_at':    record['saved_at'],
         'report_path': record['report_path'] or '',
         'record_type': record['record_type'],
@@ -562,146 +481,92 @@ def _save_draft(conn, snapshot: dict):
     patient = snapshot.get('patient', {})
     prepared_by_id = snapshot.get('prepared_by_id') or None
     checked_by_id  = snapshot.get('checked_by_id')  or None
-    conn.execute(
-        """INSERT INTO drafts
-               (id, saved_at, report_path, sample_rows_json, duration_options_json,
-                times_json, concs_json, name, age, sex, invoice_date, invoice_number,
-                report_number, dept, diagnosis, tx_date, delivery_date,
-                drug, preparation, dose, dose_dt, sample_collection_date,
-                co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-           ON CONFLICT (id) DO UPDATE SET
-               saved_at               = EXCLUDED.saved_at,
-               report_path            = EXCLUDED.report_path,
-               sample_rows_json       = EXCLUDED.sample_rows_json,
-               duration_options_json  = EXCLUDED.duration_options_json,
-               times_json             = EXCLUDED.times_json,
-               concs_json             = EXCLUDED.concs_json,
-               name                   = EXCLUDED.name,
-               age                    = EXCLUDED.age,
-               sex                    = EXCLUDED.sex,
-               invoice_date           = EXCLUDED.invoice_date,
-               invoice_number         = EXCLUDED.invoice_number,
-               report_number          = EXCLUDED.report_number,
-               dept                   = EXCLUDED.dept,
-               diagnosis              = EXCLUDED.diagnosis,
-               tx_date                = EXCLUDED.tx_date,
-               delivery_date          = EXCLUDED.delivery_date,
-               drug                   = EXCLUDED.drug,
-               preparation            = EXCLUDED.preparation,
-               dose                   = EXCLUDED.dose,
-               dose_dt                = EXCLUDED.dose_dt,
-               sample_collection_date = EXCLUDED.sample_collection_date,
-               co_medications         = EXCLUDED.co_medications,
-               scheme                 = EXCLUDED.scheme,
-               trough                 = EXCLUDED.trough,
-               phone                  = EXCLUDED.phone,
-               prepared_by_id         = EXCLUDED.prepared_by_id,
-               checked_by_id          = EXCLUDED.checked_by_id""",
-        """INSERT OR REPLACE INTO drafts
-           (id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
-            name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
-            drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            snapshot['id'],
-            snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
-            snapshot.get('report_path'),
-            snapshot.get('sampling_mode', 'multi'),
-            snapshot.get('direct_auc', ''),
-            json.dumps(snapshot.get('sample_rows', [])),
-            json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
-            json.dumps(snapshot.get('times', [])),
-            json.dumps(snapshot.get('concs', [])),
-            patient.get('name'),
-            patient.get('age'),
-            patient.get('sex'),
-            patient.get('invoice_date'),
-            patient.get('invoice_number'),
-            patient.get('report_number'),
-            patient.get('dept'),
-            patient.get('diag'),
-            patient.get('tx_date'),
-            patient.get('delivery_date'),
-            patient.get('drug'),
-            patient.get('preparation'),
-            patient.get('dose'),
-            patient.get('dose_dt'),
-            patient.get('sample_collection_date'),
-            patient.get('med'),
-            snapshot.get('scheme'),
-            snapshot.get('trough'),
-            patient.get('phone'),
-            prepared_by_id,
-            checked_by_id,
-        )
+    params = (
+        snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
+        snapshot.get('report_path'),
+        snapshot.get('sampling_mode', 'multi'),
+        snapshot.get('direct_auc', ''),
+        json.dumps(snapshot.get('sample_rows', [])),
+        json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
+        json.dumps(snapshot.get('times', [])),
+        json.dumps(snapshot.get('concs', [])),
+        patient.get('name'),
+        patient.get('age'),
+        patient.get('sex'),
+        patient.get('invoice_date'),
+        patient.get('invoice_number'),
+        patient.get('report_number'),
+        patient.get('dept'),
+        patient.get('diag'),
+        patient.get('tx_date'),
+        patient.get('delivery_date'),
+        patient.get('drug'),
+        patient.get('preparation'),
+        patient.get('dose'),
+        patient.get('dose_dt'),
+        patient.get('sample_collection_date'),
+        patient.get('med'),
+        snapshot.get('scheme'),
+        snapshot.get('trough'),
+        patient.get('phone'),
+        prepared_by_id,
+        checked_by_id,
     )
 
-
-def _migrate_legacy_drafts(conn):
-    try:
-        legacy_drafts = conn.execute("""
-            SELECT r.id, r.saved_at, r.report_path, r.sample_rows_json, r.duration_options_json,
-                   r.drug, r.preparation, r.dose, r.dose_dt, r.sample_collection_date,
-                   r.co_medications, r.scheme, r.trough,
-                   p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
-                   p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date
-            FROM records r
-            LEFT JOIN patients p ON r.patient_id = p.id
-            WHERE r.record_type = 'draft'
-        """).fetchall()
-        for row in legacy_drafts:
-            points = conn.execute(
-                """SELECT time_point, concentration FROM sample_points
-                   WHERE record_id = %s ORDER BY point_order""",
-                (row['id'],)
-            ).fetchall()
-            times = [p['time_point'] for p in points]
-            concs = [p['concentration'] for p in points]
-            snapshot = {
-                'id':          row['id'],
-                'saved_at':    row['saved_at'],
-                'report_path': row['report_path'] or '',
-                'record_type': 'draft',
-                'sampling_mode': row['sampling_mode'] if 'sampling_mode' in row.keys() and row['sampling_mode'] else 'multi',
-                'direct_auc': row['direct_auc'] if 'direct_auc' in row.keys() and row['direct_auc'] else '',
-                'patient': {
-                    'name':                   row['name']          or 'N/A',
-                    'age':                    row['age']           or 'N/A',
-                    'sex':                    row['sex']           or '',
-                    'invoice_date':           row['invoice_date']  or '',
-                    'invoice_number':         row['invoice_number'] or 'N/A',
-                    'report_number':          row['report_number'] or 'N/A',
-                    'dept':                   row['dept']          or 'N/A',
-                    'diag':                   row['diagnosis']     or 'N/A',
-                    'tx_date':                row['tx_date']       or '',
-                    'delivery_date':          row['delivery_date'] or '',
-                    'drug':                   row['drug']          or '',
-                    'preparation':            row['preparation']   or '',
-                    'dose':                   row['dose']          or '',
-                    'dose_dt':                row['dose_dt']       or '',
-                    'sample_collection_date': row['sample_collection_date'] or '',
-                    'med':                    row['co_medications'] or 'N/A',
-                },
-                'scheme': row['scheme'] or 4,
-                'trough': row['trough'] or '',
-                'times':  times,
-                'concs':  concs,
-            }
-            if row['sample_rows_json']:
-                try:
-                    snapshot['sample_rows'] = json.loads(row['sample_rows_json'])
-                except Exception:
-                    pass
-            if row['duration_options_json']:
-                try:
-                    snapshot['duration_options'] = json.loads(row['duration_options_json'])
-                except Exception:
-                    pass
-            _save_draft(conn, snapshot)
-            conn.execute("DELETE FROM records WHERE id = %s", (row['id'],))
-    except Exception:
+    draft_id = snapshot.get('id')
+    if draft_id is None:
         pass
+    else:
+        cur = conn.execute(
+            """UPDATE drafts SET
+                   saved_at               = %s,
+                   report_path            = %s,
+                   sampling_mode          = %s,
+                   direct_auc             = %s,
+                   sample_rows_json       = %s,
+                   duration_options_json  = %s,
+                   times_json             = %s,
+                   concs_json             = %s,
+                   name                   = %s,
+                   age                    = %s,
+                   sex                    = %s,
+                   invoice_date           = %s,
+                   invoice_number         = %s,
+                   report_number          = %s,
+                   dept                   = %s,
+                   diagnosis              = %s,
+                   tx_date                = %s,
+                   delivery_date          = %s,
+                   drug                   = %s,
+                   preparation            = %s,
+                   dose                   = %s,
+                   dose_dt                = %s,
+                   sample_collection_date = %s,
+                   co_medications         = %s,
+                   scheme                 = %s,
+                   trough                 = %s,
+                   phone                  = %s,
+                   prepared_by_id         = %s,
+                   checked_by_id          = %s
+               WHERE id = %s""",
+            params + (draft_id,),
+        )
+        if cur.rowcount:
+            return draft_id
+
+    cur = conn.execute(
+        """INSERT INTO drafts
+               (saved_at, report_path, sampling_mode, direct_auc, sample_rows_json,
+                duration_options_json, times_json, concs_json, name, age, sex, invoice_date,
+                invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+                drug, preparation, dose, dose_dt, sample_collection_date,
+                co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           RETURNING id""",
+        params,
+    )
+    snapshot['id'] = cur.fetchone()['id']
+    return snapshot['id']
 
 
 # ─────────────────────────────────────────
@@ -711,74 +576,98 @@ def _migrate_legacy_drafts(conn):
 def save_record(snapshot: dict, record_type: str = 'sample'):
     if record_type == 'draft':
         with _connect() as conn:
-            _save_draft(conn, snapshot)
-        return
+            return _save_draft(conn, snapshot)
 
     patient        = snapshot.get('patient', {})
     prepared_by_id = snapshot.get('prepared_by_id') or None
     checked_by_id  = snapshot.get('checked_by_id')  or None
 
     with _connect() as conn:
-        patient_id = _get_or_create_patient(conn, patient)
+        record_id = snapshot.get('id')
+        patient_id = snapshot.get('patient_db_id')
+        if patient_id is None and record_id is not None:
+            row = conn.execute(
+                "SELECT patient_id FROM records WHERE id = %s",
+                (record_id,),
+            ).fetchone()
+            if row:
+                patient_id = row['patient_id']
 
-        conn.execute(
-            """INSERT INTO records
-                   (id, patient_id, record_type, saved_at, report_path, sample_rows_json,
-                    duration_options_json, drug, preparation, dose, dose_dt,
-                    sample_collection_date, co_medications, scheme, trough,
-                    prepared_by_id, checked_by_id)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT (id) DO UPDATE SET
-                   patient_id             = EXCLUDED.patient_id,
-                   record_type            = EXCLUDED.record_type,
-                   saved_at               = EXCLUDED.saved_at,
-                   report_path            = EXCLUDED.report_path,
-                   sample_rows_json       = EXCLUDED.sample_rows_json,
-                   duration_options_json  = EXCLUDED.duration_options_json,
-                   drug                   = EXCLUDED.drug,
-                   preparation            = EXCLUDED.preparation,
-                   dose                   = EXCLUDED.dose,
-                   dose_dt                = EXCLUDED.dose_dt,
-                   sample_collection_date = EXCLUDED.sample_collection_date,
-                   co_medications         = EXCLUDED.co_medications,
-                   scheme                 = EXCLUDED.scheme,
-                   trough                 = EXCLUDED.trough,
-                   prepared_by_id         = EXCLUDED.prepared_by_id,
-                   checked_by_id          = EXCLUDED.checked_by_id""",
-            """INSERT OR REPLACE INTO records
-               (id, patient_id, record_type, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json,
-                drug, preparation, dose, dose_dt,
-                sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                snapshot['id'],
-                patient_id,
-                record_type,
-                snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
-                snapshot.get('report_path'),
-                snapshot.get('sampling_mode', 'multi'),
-                snapshot.get('direct_auc', ''),
-                json.dumps(snapshot.get('sample_rows', [])),
-                json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
-                patient.get('drug'),
-                patient.get('preparation'),
-                patient.get('dose'),
-                patient.get('dose_dt'),
-                patient.get('sample_collection_date'),
-                patient.get('med'),
-                snapshot.get('scheme'),
-                snapshot.get('trough'),
-                prepared_by_id,
-                checked_by_id,
-            )
+        patient_id = _get_or_create_patient(conn, patient, patient_id)
+        snapshot['patient_db_id'] = patient_id
+
+        params = (
+            patient_id,
+            record_type,
+            snapshot.get('saved_at', datetime.now().strftime("%d/%m/%Y")),
+            snapshot.get('report_path'),
+            snapshot.get('sampling_mode', 'multi'),
+            snapshot.get('direct_auc', ''),
+            json.dumps(snapshot.get('sample_rows', [])),
+            json.dumps(snapshot.get('duration_options', [snapshot.get('scheme', 4)])),
+            patient.get('drug'),
+            patient.get('preparation'),
+            patient.get('dose'),
+            patient.get('dose_dt'),
+            patient.get('sample_collection_date'),
+            patient.get('med'),
+            snapshot.get('scheme'),
+            snapshot.get('trough'),
+            prepared_by_id,
+            checked_by_id,
         )
 
-        conn.execute("DELETE FROM sample_points WHERE record_id = %s", (snapshot['id'],))
+        record_id = snapshot.get('id')
+        if record_id is None:
+            pass
+        else:
+            cur = conn.execute(
+                """UPDATE records SET
+                       patient_id             = %s,
+                       record_type            = %s,
+                       saved_at               = %s,
+                       report_path            = %s,
+                       sampling_mode          = %s,
+                       direct_auc             = %s,
+                       sample_rows_json       = %s,
+                       duration_options_json  = %s,
+                       drug                   = %s,
+                       preparation            = %s,
+                       dose                   = %s,
+                       dose_dt                = %s,
+                       sample_collection_date = %s,
+                       co_medications         = %s,
+                       scheme                 = %s,
+                       trough                 = %s,
+                       prepared_by_id         = %s,
+                       checked_by_id          = %s
+                   WHERE id = %s""",
+                params + (record_id,),
+            )
+            if cur.rowcount:
+                pass
+            else:
+                record_id = None
+
+        if record_id is None:
+            cur = conn.execute(
+                """INSERT INTO records
+                       (patient_id, record_type, saved_at, report_path, sampling_mode, direct_auc,
+                        sample_rows_json, duration_options_json, drug, preparation, dose, dose_dt,
+                        sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING id""",
+                params,
+            )
+            record_id = cur.fetchone()['id']
+            snapshot['id'] = record_id
+
+        conn.execute("DELETE FROM sample_points WHERE record_id = %s", (record_id,))
         for i, (t, c) in enumerate(zip(snapshot.get('times', []), snapshot.get('concs', []))):
             conn.execute(
                 """INSERT INTO sample_points (record_id, point_order, time_point, concentration)
                    VALUES (%s, %s, %s, %s)""",
-                (snapshot['id'], i, t, c)
+                (record_id, i, t, c)
             )
 
         pk = snapshot.get('pk')
@@ -801,7 +690,7 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                        lss_equation   = EXCLUDED.lss_equation,
                        interpretation = EXCLUDED.interpretation""",
                 (
-                    snapshot['id'],
+                    record_id,
                     pk.get('auc_0_last'),
                     pk.get('auc_0_12'),
                     pk.get('lambda_z'),
@@ -816,10 +705,11 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                 )
             )
         else:
-            conn.execute("DELETE FROM pk_results WHERE record_id = %s", (snapshot['id'],))
+            conn.execute("DELETE FROM pk_results WHERE record_id = %s", (record_id,))
+        return record_id
 
 
-def delete_record(record_id: str):
+def delete_record(record_id: int):
     with _connect() as conn:
         conn.execute("DELETE FROM records WHERE id = %s", (record_id,))
         conn.execute("DELETE FROM drafts WHERE id = %s", (record_id,))
@@ -828,7 +718,7 @@ def delete_record(record_id: str):
 def load_all() -> tuple[list, list]:
     with _connect() as conn:
         records = conn.execute("""
-            SELECT r.id, r.record_type, r.saved_at, r.report_path, r.sampling_mode, r.direct_auc, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
+            SELECT r.id, r.patient_id, r.record_type, r.saved_at, r.report_path, r.sampling_mode, r.direct_auc, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
                    r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
@@ -938,79 +828,59 @@ def delete_medication(name: str):
         conn.execute("DELETE FROM medications WHERE name = %s", (name,))
 
 
-def load_doctors() -> list:
+def load_signatories() -> list:
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM doctors ORDER BY id DESC").fetchall()
+        rows = conn.execute("SELECT * FROM signatories ORDER BY id DESC").fetchall()
         return [dict(row) for row in rows]
 
 
-def get_doctor_by_id(doctor_id: int) -> dict | None:
-    if not doctor_id:
+def get_signatory_by_id(signatory_id: int) -> dict | None:
+    if not signatory_id:
         return None
     with _connect() as conn:
-        row = conn.execute("SELECT * FROM doctors WHERE id = %s", (doctor_id,)).fetchone()
+        row = conn.execute("SELECT * FROM signatories WHERE id = %s", (signatory_id,)).fetchone()
         return dict(row) if row else None
 
 
-def is_doctor_phone_exists(phone: str, exclude_id: int = None) -> bool:
+def is_signatory_phone_exists(phone: str, exclude_id: int = None) -> bool:
     if not phone:
         return False
     with _connect() as conn:
         if exclude_id:
             row = conn.execute(
-                "SELECT 1 FROM doctors WHERE phone = %s AND id != %s", (phone, exclude_id)
+                "SELECT 1 FROM signatories WHERE phone = %s AND id != %s", (phone, exclude_id)
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT 1 FROM doctors WHERE phone = %s", (phone,)
+                "SELECT 1 FROM signatories WHERE phone = %s", (phone,)
             ).fetchone()
         return row is not None
 
 
-def add_doctor(name: str, designation: str, signature_path: str = None,
-               type: str = 'doctor', phone: str = None) -> int:
+def add_signatory(name: str, designation: str, signature_path: str = None,
+                  type: str = 'doctor', phone: str = None) -> int:
     with _connect() as conn:
         cur = conn.execute(
-            """INSERT INTO doctors (name, designation, signature_path, type, phone)
+            """INSERT INTO signatories (name, designation, signature_path, type, phone)
                VALUES (%s, %s, %s, %s, %s) RETURNING id""",
             (name, designation, signature_path, type, phone)
         )
         return cur.fetchone()['id']
 
 
-def update_doctor(doctor_id: int, name: str, designation: str,
-                  signature_path: str = None, type: str = 'doctor', phone: str = None):
+def update_signatory(signatory_id: int, name: str, designation: str,
+                     signature_path: str = None, type: str = 'doctor', phone: str = None):
     with _connect() as conn:
         conn.execute(
-            """UPDATE doctors
+            """UPDATE signatories
                SET name = %s, designation = %s, signature_path = %s, type = %s, phone = %s
                WHERE id = %s""",
-            (name, designation, signature_path, type, phone, doctor_id)
+            (name, designation, signature_path, type, phone, signatory_id)
         )
 
 
-def delete_doctor(doctor_id: int):
+def delete_signatory(signatory_id: int):
     with _connect() as conn:
-        conn.execute("DELETE FROM doctors WHERE id = %s", (doctor_id,))
+        conn.execute("DELETE FROM signatories WHERE id = %s", (signatory_id,))
 
 
-def migrate_from_json(json_path: Path):
-    if not json_path.exists():
-        return
-    try:
-        data = json.loads(json_path.read_text())
-        samples = data if isinstance(data, list) else data.get('samples', [])
-        drafts  = [] if isinstance(data, list) else data.get('drafts', [])
-        for snapshot in samples:
-            try:
-                save_record(snapshot, 'sample')
-            except Exception:
-                pass
-        for snapshot in drafts:
-            try:
-                save_record(snapshot, 'draft')
-            except Exception:
-                pass
-        json_path.rename(json_path.with_suffix('.json.bak'))
-    except Exception:
-        pass

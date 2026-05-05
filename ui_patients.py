@@ -193,6 +193,13 @@ class ResultsDialog(QDialog):
         self._toast.setFixedWidth(width)
         self._toast.move(self.width() - width - 24, 20)
 
+    def shutdown(self):
+        try:
+            if hasattr(self, "canvas") and self.canvas is not None:
+                self.canvas.cleanup()
+        except Exception:
+            pass
+
     def show_toast(self, title, body, tone="success"):
         self._position_toast()
         self._toast.show_message(title, body, tone=tone)
@@ -361,10 +368,10 @@ class PatientReportDialog(QDialog):
 
 
 class PatientRow(QFrame):
-    edit_requested = pyqtSignal(str)
-    view_requested = pyqtSignal(str)
-    print_requested = pyqtSignal(str)
-    delete_requested = pyqtSignal(str)
+    edit_requested = pyqtSignal(int)
+    view_requested = pyqtSignal(int)
+    print_requested = pyqtSignal(int)
+    delete_requested = pyqtSignal(int)
 
     def __init__(self, snapshot: dict, row_type: str = 'sample', serial_no: int | None = None, parent=None):
         super().__init__(parent)
@@ -754,20 +761,20 @@ class PatientsListCard(Card):
         if visible:
             self._pagination.hide()
 
-class DoctorRow(QFrame):
+class SignatoryRow(QFrame):
     edit_requested = pyqtSignal(dict)
     delete_requested = pyqtSignal(dict)
 
-    def __init__(self, doctor, serial_no=1):
+    def __init__(self, signatory, serial_no=1):
         super().__init__()
-        self.doctor = doctor
+        self.signatory = signatory
         self.setFixedHeight(68)
         self.setObjectName("doctorRow")
         
-        accent   = "#8B5CF6" if doctor.get('type') == 'doctor' else "#0D9488" # Purple for Doctor, Teal for Tech
-        bg       = "#FBFBFF" if doctor.get('type') == 'doctor' else "#F0FDFA"
-        bg_hover = "#F5F3FF" if doctor.get('type') == 'doctor' else "#CCFBF1"
-        border   = "#DDD6FE" if doctor.get('type') == 'doctor' else "#99F6E4"
+        accent   = "#8B5CF6" if signatory.get('type') == 'doctor' else "#0D9488" # Purple for Doctor, Teal for Tech
+        bg       = "#FBFBFF" if signatory.get('type') == 'doctor' else "#F0FDFA"
+        bg_hover = "#F5F3FF" if signatory.get('type') == 'doctor' else "#CCFBF1"
+        border   = "#DDD6FE" if signatory.get('type') == 'doctor' else "#99F6E4"
 
         self.setStyleSheet(f"""
             QFrame#doctorRow {{
@@ -801,11 +808,11 @@ class DoctorRow(QFrame):
         name_lay.setContentsMargins(0, 0, 0, 0)
         name_lay.setSpacing(2)
         
-        name_lbl = QLabel(doctor.get('name', 'N/A'))
+        name_lbl = QLabel(signatory.get('name', 'N/A'))
         name_lbl.setStyleSheet(f"color: {TEXT_CLR}; font-size: 13.5px; font-weight: 700; background: transparent; border: none;")
         name_lay.addWidget(name_lbl)
         
-        type_str = doctor.get('type', 'doctor').upper()
+        type_str = signatory.get('type', 'doctor').upper()
         type_badge = QLabel(type_str)
         type_badge.setFixedWidth(90)
         type_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -818,7 +825,7 @@ class DoctorRow(QFrame):
         lay.addWidget(name_wrap, 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         # Phone
-        phone = (doctor.get('phone') or '').strip()
+        phone = (signatory.get('phone') or '').strip()
         phone_lbl = QLabel(phone if phone else "N/A")
         phone_lbl.setStyleSheet(f"color: {BLUE if phone else '#94A3B8'}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
         lay.addWidget(phone_lbl, 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -840,8 +847,8 @@ class DoctorRow(QFrame):
             btn.clicked.connect(cb)
             return btn
 
-        actions.addWidget(make_act_btn("mdi6.pencil-outline", BLUE, "#EFF6FF", "#DBEAFE", lambda: self.edit_requested.emit(doctor)))
-        actions.addWidget(make_act_btn("mdi6.trash-can-outline", RED, "#FEF2F2", "#FEE2E2", lambda: self.delete_requested.emit(doctor)))
+        actions.addWidget(make_act_btn("mdi6.pencil-outline", BLUE, "#EFF6FF", "#DBEAFE", lambda: self.edit_requested.emit(signatory)))
+        actions.addWidget(make_act_btn("mdi6.trash-can-outline", RED, "#FEF2F2", "#FEE2E2", lambda: self.delete_requested.emit(signatory)))
         
         actions_widget = QWidget()
         actions_widget.setFixedWidth(100)
@@ -852,7 +859,7 @@ class DoctorRow(QFrame):
         lay.addWidget(actions_widget, 0, Qt.AlignmentFlag.AlignCenter)
 
 
-class DoctorsListCard(Card):
+class SignatoriesListCard(Card):
     search_changed = pyqtSignal(str)
     page_changed = pyqtSignal()
     
@@ -872,7 +879,7 @@ class DoctorsListCard(Card):
             # Insert after icon and title (index 2) but before stretch
             self._header_lay.insertWidget(2, self._count_badge)
 
-        self._empty_text = "No doctors found."
+        self._empty_text = "No signatories found."
         self._empty = QLabel(self._empty_text)
         self._empty.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

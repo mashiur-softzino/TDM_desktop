@@ -324,6 +324,14 @@ class GradientCanvas(FigureCanvas):
                      color='#BDBDBD', fontsize=12)
         self.draw()
 
+    def cleanup(self):
+        try:
+            self.ax.clear()
+            self.fig.clear()
+            self.close()
+        except Exception:
+            pass
+
     def plot(self, times, concs, drug='MPA'):
         import numpy as np
         from scipy.interpolate import CubicSpline

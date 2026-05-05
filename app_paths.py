@@ -52,10 +52,6 @@ def reports_dir() -> Path:
     return path
 
 
-def db_file() -> Path:
-    return ensure_data_dirs() / "tdm_report.db"
-
-
 def license_file() -> Path:
     return ensure_data_dirs() / "license.json"
 
