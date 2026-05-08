@@ -6,8 +6,14 @@ AUC method: Linear-Up / Log-Down (mixed trapezoidal) — FDA/EMA standard
 LSS regression equations: Le Meur et al., Transplantation 2003
 """
 
-import numpy as np
-from scipy.stats import linregress
+def _numpy():
+    import numpy as np
+    return np
+
+
+def _linregress():
+    from scipy.stats import linregress
+    return linregress
 
 
 def canonical_drug_name(drug: str) -> str:
@@ -107,6 +113,7 @@ def mixed_trapezoidal_auc(times, concentrations):
     - Rising segments (Cᵢ₊₁ ≥ Cᵢ): linear trapezoid
     - Falling segments (Cᵢ₊₁ < Cᵢ): log-linear trapezoid
     """
+    np = _numpy()
     times = np.array(times, dtype=float)
     concs = np.array(concentrations, dtype=float)
     auc = 0.0
@@ -135,6 +142,8 @@ def estimate_lambda_z(times, concentrations, n_points=3):
     log-linear regression on the last n_points data points.
     Returns (lambda_z, r_squared) or (None, None) if cannot estimate.
     """
+    np = _numpy()
+    linregress = _linregress()
     times = np.array(times, dtype=float)
     concs = np.array(concentrations, dtype=float)
 
@@ -177,6 +186,7 @@ def calculate_auc_full(times, concentrations, dose_interval=12.0):
       c_trough    : trough (pre-dose) concentration
       c_last      : last observed concentration
     """
+    np = _numpy()
     times = np.array(times, dtype=float)
     concs = np.array(concentrations, dtype=float)
 

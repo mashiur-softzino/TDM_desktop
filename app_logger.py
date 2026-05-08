@@ -11,13 +11,21 @@ for compliance/audit purposes.
 """
 
 import logging
+import os
 import sys
 import traceback
 from datetime import date
 from pathlib import Path
-from app_paths import log_dir
 
-LOG_DIR = log_dir()
+
+def _log_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    root = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    path = root / "Softzino" / "AUC-Sampler" / "logs"
+    return path
+
+
+LOG_DIR = _log_dir()
 
 _FMT_APP   = "%(asctime)s | %(levelname)-8s | %(message)s"
 _FMT_ERROR = "%(asctime)s | %(levelname)-8s | %(pathname)s:%(lineno)d | %(message)s"
@@ -59,9 +67,17 @@ app_log.setLevel(logging.DEBUG)
 error_log.setLevel(logging.ERROR)
 audit_log.setLevel(logging.DEBUG)
 
-app_log.addHandler(_DailyFileHandler("app",   logging.INFO,  _FMT_APP))
-error_log.addHandler(_DailyFileHandler("error", logging.ERROR, _FMT_ERROR))
-audit_log.addHandler(_DailyFileHandler("audit", logging.DEBUG, _FMT_AUDIT))
+def _add_file_handler(logger: logging.Logger, prefix: str, level: int, fmt: str):
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        logger.addHandler(_DailyFileHandler(prefix, level, fmt))
+    except Exception:
+        logger.addHandler(logging.NullHandler())
+
+
+_add_file_handler(app_log, "app", logging.INFO, _FMT_APP)
+_add_file_handler(error_log, "error", logging.ERROR, _FMT_ERROR)
+_add_file_handler(audit_log, "audit", logging.DEBUG, _FMT_AUDIT)
 
 for _lg in (app_log, error_log, audit_log):
     _lg.propagate = False

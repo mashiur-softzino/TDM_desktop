@@ -294,7 +294,14 @@ class SignatoryEditModal(QDialog):
 
         name_sec = QVBoxLayout()
         name_sec.setSpacing(8)
-        name_sec.addWidget(small_label("FULL NAME", color="#64748B", size=10, bold=True))
+        name_label = QHBoxLayout()
+        name_label.setSpacing(4)
+        name_label.addWidget(small_label("FULL NAME", color="#64748B", size=10, bold=True))
+        name_req_star = QLabel("*")
+        name_req_star.setStyleSheet("color: #DC2626; font-size: 14px; font-weight: bold; background: transparent;")
+        name_label.addWidget(name_req_star)
+        name_label.addStretch()
+        name_sec.addLayout(name_label)
         self.name_edit = QLineEdit(signatory["name"] if signatory else "")
         self.name_edit.setPlaceholderText("e.g. Dr. John Doe")
         self.name_edit.setStyleSheet(self._input_style())
@@ -464,11 +471,15 @@ class SignatoryEditModal(QDialog):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        width = 300
+        self._position_toast()
+
+    def _position_toast(self):
+        width = min(380, max(320, self.width() - 48))
         self._toast.setFixedWidth(width)
         self._toast.move(self.width() - width - 24, 24)
 
     def _show_error(self, title, msg):
+        self._position_toast()
         self._toast.show_message(title, msg, tone="warning")
 
     def _input_style(self, arrow_path=None):

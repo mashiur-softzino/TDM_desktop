@@ -106,8 +106,30 @@ def restore_latest_database_backup() -> None:
 # Schema
 # ─────────────────────────────────────────
 
-def init_db():
-    """Create tables if they don't exist."""
+def _parse_duration_options(value, default_options: list) -> list:
+    if not value:
+        return list(default_options)
+    try:
+        data = json.loads(value)
+        cleaned = []
+        for item in data:
+            try:
+                option = int(item)
+                if option > 0 and option not in cleaned:
+                    cleaned.append(option)
+            except Exception:
+                continue
+        return cleaned or list(default_options)
+    except Exception:
+        return list(default_options)
+
+
+def init_db(default_duration_options: list | None = None):
+    """Create tables if they don't exist.
+
+    When default_duration_options is provided, returns the saved duration options
+    using the same startup connection.
+    """
     with _connect() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS patients (
@@ -241,6 +263,15 @@ def init_db():
                 ("Dr. Jane Smith", "MBBS, MS (Transplant Surgery)")
             )
         conn.commit()
+        if default_duration_options is None:
+            return None
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'duration_options'"
+        ).fetchone()
+        return _parse_duration_options(
+            row['value'] if row else None,
+            default_duration_options,
+        )
 
 
 # ─────────────────────────────────────────
@@ -768,21 +799,7 @@ def load_duration_options(default_options: list) -> list:
         row = conn.execute(
             "SELECT value FROM app_settings WHERE key = 'duration_options'"
         ).fetchone()
-        if not row or not row['value']:
-            return list(default_options)
-        try:
-            data = json.loads(row['value'])
-            cleaned = []
-            for item in data:
-                try:
-                    value = int(item)
-                    if value > 0 and value not in cleaned:
-                        cleaned.append(value)
-                except Exception:
-                    continue
-            return cleaned or list(default_options)
-        except Exception:
-            return list(default_options)
+        return _parse_duration_options(row['value'] if row else None, default_options)
 
 
 def save_duration_options(options: list):

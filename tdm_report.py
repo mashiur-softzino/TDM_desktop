@@ -38,14 +38,16 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator
+from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator, QIcon
 import qtawesome as qta
 from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, canonical_drug_name
 
 class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
-    def __init__(self):
+    def __init__(self, duration_options=None, db_initialized=False):
         super().__init__()
         self.setWindowTitle("TDM Report — Therapeutic Drug Monitoring")
+        icon_base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        self.setWindowIcon(QIcon(str(icon_base / "tdm_logo.ico")))
         self.resize(980, 700)
         self._saved_patients = []
         self._drafts = []
@@ -55,8 +57,13 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self._debounce = QTimer()
         self._debounce.setSingleShot(True)
         self._debounce.timeout.connect(self._live_plot)
-        init_db()
-        self._global_duration_options = load_duration_options(DEFAULT_DURATION_OPTIONS)
+        if not db_initialized:
+            init_db()
+        self._global_duration_options = (
+            list(duration_options)
+            if duration_options is not None
+            else load_duration_options(DEFAULT_DURATION_OPTIONS)
+        )
         self._setup_ui()
         # Defer heavy work (data load + sampling card build) to after window shows
         QTimer.singleShot(0, self._deferred_init)
@@ -308,6 +315,8 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
             self.step_patient_btn.setChecked(index == 0)
         if hasattr(self, "step_sampling_btn"):
             self.step_sampling_btn.setChecked(index == 1)
+        if hasattr(self, "_main_scroll"):
+            QTimer.singleShot(0, lambda: self._main_scroll.verticalScrollBar().setValue(0))
 
     def _build_patients_page(self):
         page = QWidget()
@@ -409,6 +418,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         delete_signatory(signatory['id'])
         self._refresh_signatories_list()
         self._refresh_signatory_combos()
+        self._show_toast("Signatory deleted", f"\"{signatory['name']}\" removed from the Signatory List.")
 
     def _make_tabs(self):
         wrap = QWidget()
@@ -1041,12 +1051,6 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._update_action_buttons())
         self.f_sample_collection_date = SmartDateEdit(initial_date=QDate.currentDate())
         self.f_sample_collection_date.dateChanged.connect(lambda *_: self._on_data_changed())
-        self.f_sample_collection_date.dateChanged.connect(self._update_tx_duration)
-        self.f_tx_date.dateChanged.connect(self._update_tx_duration)
-
-        self.f_tx_duration = field("Calculated automatically")
-        self.f_tx_duration.setReadOnly(True)
-        self.f_tx_duration.setPlaceholderText("Duration will appear here")
 
         def add_meta(row, col, label, widget, required=False):
             col_lay = QVBoxLayout()
@@ -1125,7 +1129,6 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         add_meta(0, 2, "Dose of Requested Drug", self.f_dose, required=True)
         add_meta(0, 3, "Date & Time of Dose", self.f_dose_dt)
         add_meta(1, 0, "Sample Collection Date", self.f_sample_collection_date)
-        add_meta(1, 1, "Time Duration (Post-Tx)", self.f_tx_duration)
         meta_box_lay.addLayout(meta_grid)
         card.body().addWidget(meta_box)
 
@@ -1488,7 +1491,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         prep_col = QVBoxLayout()
         prep_col.setSpacing(6)
         prep_col.addWidget(small_label("PREPARED BY"))
-        self.prep_by_combo = QComboBox()
+        self.prep_by_combo = NoWheelComboBox()
         self.prep_by_combo.setStyleSheet(combo_style)
         self.prep_by_combo.currentIndexChanged.connect(lambda *_: self._on_data_changed())
         prep_col.addWidget(self.prep_by_combo)
@@ -1498,7 +1501,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         check_col = QVBoxLayout()
         check_col.setSpacing(6)
         check_col.addWidget(small_label("CHECKED BY / APPROVED BY"))
-        self.checked_by_combo = QComboBox()
+        self.checked_by_combo = NoWheelComboBox()
         self.checked_by_combo.setStyleSheet(combo_style)
         self.checked_by_combo.currentIndexChanged.connect(lambda *_: self._on_data_changed())
         check_col.addWidget(self.checked_by_combo)
@@ -1574,31 +1577,6 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
     def _on_data_changed(self):
         self._update_action_buttons()
         self._debounce.start(400)   # debounce 400 ms for live plot
-
-    def _update_tx_duration(self):
-        tx_date = self.f_tx_date.date()
-        sample_date = self.f_sample_collection_date.date()
-        if not tx_date or not sample_date:
-            self.f_tx_duration.setText("—")
-            return
-        
-        days = tx_date.daysTo(sample_date)
-        
-        if days < 0:
-            self.f_tx_duration.setText("Invalid Date (Tx > Sample)")
-            return
-            
-        years = days // 365
-        remaining_days = days % 365
-        months = remaining_days // 30
-        final_days = remaining_days % 30
-        
-        parts = []
-        if years > 0: parts.append(f"{years} Year{'s' if years > 1 else ''}")
-        if months > 0: parts.append(f"{months} Month{'s' if months > 1 else ''}")
-        if final_days > 0 or not parts: parts.append(f"{final_days} Day{'s' if final_days != 1 else ''}")
-        
-        self.f_tx_duration.setText(", ".join(parts))
 
     def _live_plot(self):
         return

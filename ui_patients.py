@@ -48,8 +48,8 @@ class ResultsDialog(QDialog):
 
         from PyQt6.QtWidgets import QGridLayout
         self.results_card = Card("Pharmacokinetic Results", "mdi6.chart-box-outline", icon_color=BLUE)
-        grid = QGridLayout()
-        grid.setSpacing(14)
+        self._results_grid = QGridLayout()
+        self._results_grid.setSpacing(14)
 
         self.stat_trough = StatBox(
             "Trough Concentration", unit="μg/mL",
@@ -88,9 +88,9 @@ class ResultsDialog(QDialog):
             self.stat_auc,    self.stat_auc12, self.stat_interp,
             self.stat_thalf,  self.stat_lss,
         ]
-        for i, box in enumerate(boxes):
-            grid.addWidget(box, i // 3, i % 3)
-        self.results_card.body().addLayout(grid)
+        self._result_boxes = boxes
+        self._layout_result_boxes(False)
+        self.results_card.body().addLayout(self._results_grid)
 
         # Show All Points toggle
         self._show_all_expanded = False
@@ -211,6 +211,25 @@ class ResultsDialog(QDialog):
             "Hide Points  ▴" if self._show_all_expanded else "Show All Points  ▾"
         )
 
+    def _layout_result_boxes(self, direct_auc=False):
+        for box in getattr(self, "_result_boxes", []):
+            self._results_grid.removeWidget(box)
+        positions = [
+            (self.stat_trough, 0, 0),
+            (self.stat_c05, 0, 1),
+            (self.stat_clast, 0, 2),
+            (self.stat_auc, 1, 0),
+            (self.stat_auc12, 1, 1),
+            (self.stat_interp, 1, 2),
+            (self.stat_thalf, 2, 0),
+            (self.stat_lss, 2, 1),
+        ]
+        if direct_auc:
+            positions = [(box, row, col) for box, row, col in positions if box is not self.stat_lss]
+            positions.insert(1, (self.stat_lss, 0, 1))
+        for box, row, col in positions:
+            self._results_grid.addWidget(box, row, col)
+
     def apply_results(self, pk, interp, times=None, concs=None):
         def fmt_hour(v):
             return f"{int(v)}" if float(v).is_integer() else f"{v:.1f}"
@@ -302,6 +321,7 @@ class ResultsDialog(QDialog):
         self.stat_interp.set_unit(f"Therapeutic range: {rng[0]}–{rng[1]} mg·h/L")
         self.stat_interp.set_value(interp, color=interp_color)
 
+        direct_auc = not (times or concs)
         if pk.get('auc_lss') is not None:
             lss_val = pk['auc_lss']
             self.stat_lss.set_value(fmt(lss_val, 3))
@@ -311,6 +331,7 @@ class ResultsDialog(QDialog):
             self.stat_lss.set_warning(None)
         else:
             self.stat_lss.setVisible(False)
+        self._layout_result_boxes(direct_auc)
 
     def plot_data(self, times, concs, drug='MPA'):
         self.canvas.plot(times, concs, drug=drug)
@@ -458,7 +479,8 @@ class PatientRow(QFrame):
         drug.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(drug, 2)
 
-        text_cell(snapshot.get('saved_at', 'N/A'), stretch=3, object_name="dateText")
+        collection_date = snapshot.get('patient', {}).get('sample_collection_date') or "N/A"
+        text_cell(collection_date, stretch=3, object_name="dateText")
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)

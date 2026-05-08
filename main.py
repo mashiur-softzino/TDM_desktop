@@ -6,6 +6,7 @@ Entry point
 import os
 import sys
 import faulthandler
+import ctypes
 from datetime import datetime
 
 if sys.stderr is not None:
@@ -14,9 +15,27 @@ os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QIcon
 
-from app_logger import log_startup, log_shutdown, log_license_activated, log_license_expired
+
+def _asset_path(filename: str) -> str:
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, filename)
+
+
+def _load_loggers():
+    try:
+        from app_logger import (
+            log_startup,
+            log_shutdown,
+            log_license_activated,
+            log_license_expired,
+        )
+        return log_startup, log_shutdown, log_license_activated, log_license_expired
+    except Exception:
+        def _noop(*_args, **_kwargs):
+            return None
+        return _noop, _noop, _noop, _noop
 
 
 def _make_splash(app: QApplication) -> QSplashScreen:
@@ -38,11 +57,10 @@ def _make_splash(app: QApplication) -> QSplashScreen:
     painter.setBrush(QColor(255, 255, 255, 18))
     painter.drawRoundedRect(24, 22, w - 48, h - 44, 26, 26)
 
-    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    logo_path = os.path.join(base_path, "softzino.png")
+    logo_path = _asset_path("softzino.png")
     logo = QPixmap(logo_path)
     if logo.isNull():
-        logo = QPixmap(os.path.join(base_path, "SOFTZINO_LOGO.png"))
+        logo = QPixmap(_asset_path("SOFTZINO_LOGO.png"))
     if not logo.isNull():
         logo = logo.scaledToHeight(60, Qt.TransformationMode.SmoothTransformation)
         logo_x = (w - logo.width()) // 2
@@ -71,7 +89,23 @@ def _make_splash(app: QApplication) -> QSplashScreen:
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "Softzino.TDMReport"
+            )
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
+    app_icon = QIcon(_asset_path("tdm_logo.ico"))
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+    splash = _make_splash(app)
+    splash.show()
+    app.processEvents()
+
+    log_startup, log_shutdown, log_license_activated, log_license_expired = _load_loggers()
 
     from license_manager import LicenseManager
 
@@ -79,35 +113,39 @@ def main():
     if not lm.is_licensed():
         from activation_window import ActivationWindow
 
+        splash.hide()
         win = ActivationWindow(lm)
         if win.exec() != ActivationWindow.DialogCode.Accepted:
             sys.exit(0)
+        splash.show()
+        app.processEvents()
 
     lm.start_session()
     log_startup()
     info = lm.license_info()
     log_license_activated(info.get("license_key", ""), info.get("expires_at_local", ""))
 
-    splash = _make_splash(app)
-    splash.show()
-    app.processEvents()
+    from database import create_database_backup, init_db
+    from ui_constants import DEFAULT_DURATION_OPTIONS
+
+    while True:
+        try:
+            duration_options = init_db(DEFAULT_DURATION_OPTIONS)
+            break
+        except Exception:
+            splash.hide()
+            from db_connection_dialog import DBConnectionDialog
+            dlg = DBConnectionDialog()
+            if dlg.exec() != DBConnectionDialog.DialogCode.Accepted:
+                sys.exit(0)
+            splash.show()
+            app.processEvents()
 
     from tdm_report import TDMMainWindow, STYLE
-    from database import create_database_backup, test_db_connection
 
     app.setStyleSheet(STYLE)
 
-    # Check DB connection before opening main window
-    if test_db_connection() is not None:
-        splash.hide()
-        from db_connection_dialog import DBConnectionDialog
-        dlg = DBConnectionDialog()
-        if dlg.exec() != DBConnectionDialog.DialogCode.Accepted:
-            sys.exit(0)
-        splash.show()
-        app.processEvents()
-
-    window = TDMMainWindow()
+    window = TDMMainWindow(duration_options=duration_options, db_initialized=True)
     window.show()
     splash.finish(window)
 

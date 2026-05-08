@@ -106,15 +106,14 @@ class TDMWorkflowMixin:
     def _has_required_sampling_fields(self):
         if not hasattr(self, "f_drug"):
             return False
+        required = [
+            self.f_drug.text().strip(),
+            self.f_preparation.text().strip(),
+            self.f_dose.text().strip(),
+        ]
         if getattr(self, "_sampling_mode", "multi") == "direct":
-            return is_valid_direct_auc(self._direct_auc_edit.text()) and bool(self.f_dose.text().strip())
-        return all(
-            [
-                self.f_drug.text().strip(),
-                self.f_preparation.text().strip(),
-                self.f_dose.text().strip(),
-            ]
-        )
+            return all(required) and is_valid_direct_auc(self._direct_auc_edit.text())
+        return all(required)
 
     def _can_generate_or_save(self):
         if not self.f_name.text().strip() or not self._has_required_sampling_fields():
@@ -326,7 +325,6 @@ class TDMWorkflowMixin:
         self.f_dose.setText(patient.get("dose", "540mg - 720mg") if patient.get("dose") != "N/A" else "")
         tx_date = QDate.fromString(patient.get("tx_date", ""), "dd.MM.yyyy")
         self.f_tx_date.setDate(tx_date if tx_date.isValid() else None)
-        self._update_tx_duration()
         dose_dt_text = patient.get("dose_dt", "")
         dose_dt = QDateTime.fromString(dose_dt_text, "dd.MM.yyyy 'at' hh:mmAP")
         if not dose_dt.isValid():
@@ -386,7 +384,7 @@ class TDMWorkflowMixin:
         self._loaded_form_signature = self._form_signature()
         self._update_action_buttons()
         self._switch_page(0)
-        self._switch_report_step(1)
+        self._switch_report_step(0)
 
     def _delete_saved_patient(self, patient_id):
         snapshot = next((item for item in self._saved_patients if item["id"] == patient_id), None)
@@ -730,6 +728,10 @@ class TDMWorkflowMixin:
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
+        if hasattr(self, "prep_by_combo"):
+            self.prep_by_combo.setCurrentIndex(0)
+        if hasattr(self, "checked_by_combo"):
+            self.checked_by_combo.setCurrentIndex(0)
         self.f_tx_date.setDate(None)
         self.f_invoice_date.setDate(QDate.currentDate())
         self.f_delivery_date.setDate(QDate.currentDate())

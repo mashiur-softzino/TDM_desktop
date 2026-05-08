@@ -7,11 +7,6 @@ from ui_constants import (
 )
 from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
-import matplotlib
-matplotlib.use('QtAgg')
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
@@ -284,18 +279,29 @@ class ModernSampleTable(QFrame):
 # ─────────────────────────────────────────
 # Gradient matplotlib canvas
 # ─────────────────────────────────────────
-class GradientCanvas(FigureCanvas):
+class GradientCanvas(QWidget):
     def __init__(self, parent=None):
+        super().__init__(parent)
+        import matplotlib
+        matplotlib.use('QtAgg')
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+
         self.fig = Figure(figsize=(8, 4), dpi=110, facecolor='white')
         self.ax = self.fig.add_subplot(111)
-        super().__init__(self.fig)
-        self.setParent(parent)
+        self._canvas = FigureCanvas(self.fig)
+        self._canvas.installEventFilter(self)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._canvas)
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(360)
         self.fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.20)
         self._draw_empty()
 
-    def wheelEvent(self, event):
+    def _scroll_parent(self, event):
         parent = self.parent()
         while parent is not None and not isinstance(parent, QScrollArea):
             parent = parent.parent()
@@ -303,8 +309,18 @@ class GradientCanvas(FigureCanvas):
             bar = parent.verticalScrollBar()
             bar.setValue(bar.value() - event.angleDelta().y())
             event.accept()
-            return
-        super().wheelEvent(event)
+            return True
+        return False
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "_canvas", None) and event.type() == QEvent.Type.Wheel:
+            if self._scroll_parent(event):
+                return True
+        return super().eventFilter(obj, event)
+
+    def wheelEvent(self, event):
+        if not self._scroll_parent(event):
+            super().wheelEvent(event)
 
     def _draw_empty(self):
         self.ax.clear()
@@ -322,12 +338,13 @@ class GradientCanvas(FigureCanvas):
         self.ax.text(0.5, 0.5, 'Enter concentrations to see the graph',
                      transform=self.ax.transAxes, ha='center', va='center',
                      color='#BDBDBD', fontsize=12)
-        self.draw()
+        self._canvas.draw()
 
     def cleanup(self):
         try:
             self.ax.clear()
             self.fig.clear()
+            self._canvas.close()
             self.close()
         except Exception:
             pass
@@ -404,7 +421,7 @@ class GradientCanvas(FigureCanvas):
         self.ax.set_xticklabels([f"{int(t * 60)}" for t in times])
         self.ax.set_ylim(bottom=0)
         self.fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.20)
-        self.draw()
+        self._canvas.draw()
 
 
 # ─────────────────────────────────────────
