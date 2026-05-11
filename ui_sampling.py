@@ -327,7 +327,7 @@ class GradientCanvas(QWidget):
         self.ax.set_facecolor('white')
         self.ax.set_xlabel('Time (h)', fontsize=11, color='#9E9E9E', labelpad=8)
         self.ax.set_ylabel('Conc. (μg/mL)', fontsize=11, color='#9E9E9E', labelpad=8)
-        self.ax.set_title('Concentration–Time Curve', fontsize=13,
+        self.ax.set_title('Concentration-Time Graph', fontsize=13,
                            fontweight='bold', color='#1A1A2E', pad=14)
         self.ax.grid(True, linestyle='--', color='#EEEEEE', alpha=0.9)
         self.ax.spines['top'].set_visible(False)
@@ -351,7 +351,6 @@ class GradientCanvas(QWidget):
 
     def plot(self, times, concs, drug='MPA'):
         import numpy as np
-        from scipy.interpolate import CubicSpline
         from matplotlib.collections import LineCollection
         import matplotlib.pyplot as plt
 
@@ -370,40 +369,28 @@ class GradientCanvas(QWidget):
         self.ax.spines['bottom'].set_color(BORDER)
         self.ax.tick_params(colors='#9E9E9E', labelsize=10)
 
-        # Smooth curve via cubic spline
-        unique_time_count = len(np.unique(times))
-        if len(times) >= 3 and unique_time_count == len(times):
-            cs = CubicSpline(times, concs)
-            t_fine = np.linspace(times[0], times[-1], 500)
-            c_fine = np.clip(cs(t_fine), 0, None)
-        else:
-            t_fine = times
-            c_fine = concs
-
-        # ── Rainbow gradient line ──────────────────────
+        t_fine = times
+        c_fine = concs
         points = np.array([t_fine, c_fine]).T.reshape(-1, 1, 2)
         segs = np.concatenate([points[:-1], points[1:]], axis=1)
-        norm = plt.Normalize(t_fine[0], t_fine[-1])
+        norm = plt.Normalize(t_fine[0], t_fine[-1] if t_fine[-1] != t_fine[0] else t_fine[0] + 1)
         lc = LineCollection(segs, cmap='rainbow', norm=norm, linewidth=2.8, zorder=3)
         lc.set_array(t_fine)
         self.ax.add_collection(lc)
 
-        # ── Gradient fill (batched for performance) ──
         n_fill = 80
         t_segs = np.linspace(t_fine[0], t_fine[-1], n_fill + 1)
         for i in range(n_fill):
             ts = t_segs[i:i + 2]
-            cs_seg = np.clip(cs(ts), 0, None) if len(times) >= 3 and unique_time_count == len(times) else np.interp(ts, times, concs)
+            cs_seg = np.interp(ts, times, concs)
             col = plt.cm.rainbow(norm(t_segs[i]))
             self.ax.fill_between(ts, 0, cs_seg, color=col, alpha=0.18, zorder=1)
 
-        # ── Data points with matching rainbow colours ──
         dot_colors = plt.cm.rainbow(np.linspace(0, 1, len(times)))
-        for i, (t, c, col) in enumerate(zip(times, concs, dot_colors)):
+        for t, c, col in zip(times, concs, dot_colors):
             self.ax.scatter(t, c, color=col, s=90, zorder=5,
                             edgecolors='white', linewidth=2)
 
-        # ── Trough label ──
         self.ax.annotate(
             'Trough', (times[0], concs[0]),
             xytext=(8, 12), textcoords='offset points',
@@ -411,17 +398,18 @@ class GradientCanvas(QWidget):
             arrowprops=dict(arrowstyle='-', color=RED, lw=1)
         )
 
-        conc_unit = 'μg/mL' if canonical_drug_name(drug) == 'MPA' else 'ng/mL'
+        conc_unit = '??g/mL' if canonical_drug_name(drug) == 'MPA' else 'ng/mL'
         self.ax.set_xlabel('Time (min)', fontsize=11, color='#9E9E9E', labelpad=8)
         self.ax.set_ylabel(f'Conc. ({conc_unit})', fontsize=11, color='#9E9E9E', labelpad=8)
-        self.ax.set_title('Concentration–Time Curve', fontsize=13,
-                           fontweight='bold', color='#1A1A2E', pad=14)
-        self.ax.set_xlim(left=max(-0.15, times[0] - 0.2))
+        self.ax.set_title('Concentration-Time Graph', fontsize=13,
+                          fontweight='bold', color='#1A1A2E', pad=14)
+        self.ax.set_xlim(left=0, right=times[-1])
         self.ax.set_xticks(times)
         self.ax.set_xticklabels([f"{int(t * 60)}" for t in times])
         self.ax.set_ylim(bottom=0)
         self.fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.20)
         self._canvas.draw()
+
 
 
 # ─────────────────────────────────────────

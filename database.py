@@ -3,8 +3,11 @@ TDM Report — Database layer (PostgreSQL)
 """
 
 import json
+import mimetypes
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
@@ -19,6 +22,13 @@ DEFAULT_MEDICATIONS_SEED = [
     "Calcium + Vitamin D", "Sirolimus", "Everolimus", "Azathioprine",
     "Linagliptin", "Ostoref-D", "Shelcal",
 ]
+
+DEFAULT_REPORT_PRINT_CONFIG = {
+    "mode": "custom",
+    "custom_top_gap_cm": 2.3,
+}
+
+DEFAULT_SIGNATORY_SEED_FILE = "seed_signatories.json"
 
 
 # ─────────────────────────────────────────
@@ -76,8 +86,78 @@ def _connect() -> _ConnWrapper:
             dbname=c['database'],
             user=c['username'],
             password=c['password'] or None,
+            connect_timeout=5,
         )
     return _ConnWrapper(conn)
+
+
+def _asset_base_dir() -> Path:
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+
+def _load_default_signatories() -> list:
+    seed_path = _asset_base_dir() / DEFAULT_SIGNATORY_SEED_FILE
+    if not seed_path.exists():
+        return []
+    try:
+        data = json.loads(seed_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _seed_default_signatories(conn) -> int:
+    inserted = 0
+    for item in _load_default_signatories():
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        phone = str(item.get("phone") or "").strip() or None
+        signatory_type = str(item.get("type") or "doctor").strip() or "doctor"
+        designation = str(item.get("designation") or "").strip()
+        existing = None
+        if phone:
+            existing = conn.execute(
+                "SELECT id FROM signatories WHERE phone = %s",
+                (phone,)
+            ).fetchone()
+        if existing is None:
+            existing = conn.execute(
+                "SELECT id FROM signatories WHERE lower(name) = lower(%s) AND type = %s",
+                (name, signatory_type)
+            ).fetchone()
+        if existing is not None:
+            continue
+
+        signature_path = str(item.get("signature_file") or "").strip()
+        signature_data = None
+        signature_mime = None
+        if signature_path:
+            path = _asset_base_dir() / signature_path
+            try:
+                if path.exists() and path.stat().st_size <= 2 * 1024 * 1024:
+                    signature_data = path.read_bytes()
+                    signature_mime = mimetypes.guess_type(str(path))[0] or "image/png"
+            except OSError:
+                signature_data = None
+                signature_mime = None
+
+        conn.execute(
+            """INSERT INTO signatories
+               (name, designation, signature_path, signature_data, signature_mime, type, phone, is_active)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)""",
+            (
+                name,
+                designation,
+                signature_path or None,
+                psycopg2.Binary(signature_data) if signature_data else None,
+                signature_mime,
+                signatory_type,
+                phone,
+            )
+        )
+        inserted += 1
+    return inserted
 
 
 def test_db_connection() -> str | None:
@@ -124,6 +204,48 @@ def _parse_duration_options(value, default_options: list) -> list:
         return list(default_options)
 
 
+def _ensure_legacy_schema_compat(conn) -> None:
+    """Add columns needed by older installed databases."""
+    legacy_columns = [
+        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_data BYTEA",
+        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_mime TEXT",
+        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'doctor'",
+        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS phone TEXT",
+        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE records ADD COLUMN IF NOT EXISTS prepared_by_id INTEGER REFERENCES signatories(id)",
+        "ALTER TABLE records ADD COLUMN IF NOT EXISTS checked_by_id INTEGER REFERENCES signatories(id)",
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS prepared_by_id INTEGER REFERENCES signatories(id)",
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS checked_by_id INTEGER REFERENCES signatories(id)",
+    ]
+    for sql in legacy_columns:
+        conn.execute(sql)
+
+
+def _migrate_legacy_signature_files(conn) -> None:
+    legacy_sigs = conn.execute(
+        """SELECT id, signature_path
+           FROM signatories
+           WHERE signature_data IS NULL
+             AND signature_path IS NOT NULL
+             AND signature_path <> ''"""
+    ).fetchall()
+    for sig in legacy_sigs:
+        path = Path(sig['signature_path'])
+        try:
+            if not path.exists() or path.stat().st_size > 2 * 1024 * 1024:
+                continue
+            data = path.read_bytes()
+            mime = mimetypes.guess_type(str(path))[0] or "image/png"
+            conn.execute(
+                """UPDATE signatories
+                   SET signature_data = %s, signature_mime = %s
+                   WHERE id = %s""",
+                (psycopg2.Binary(data), mime, sig['id'])
+            )
+        except OSError:
+            continue
+
+
 def init_db(default_duration_options: list | None = None):
     """Create tables if they don't exist.
 
@@ -153,8 +275,11 @@ def init_db(default_duration_options: list | None = None):
                 name           TEXT NOT NULL,
                 designation    TEXT,
                 signature_path TEXT,
+                signature_data BYTEA,
+                signature_mime TEXT,
                 type           TEXT NOT NULL DEFAULT 'doctor',
-                phone          TEXT
+                phone          TEXT,
+                is_active      BOOLEAN NOT NULL DEFAULT TRUE
             );
 
             CREATE TABLE IF NOT EXISTS records (
@@ -245,23 +370,15 @@ def init_db(default_duration_options: list | None = None):
                 checked_by_id          INTEGER REFERENCES signatories(id)
             )
         """)
+        _ensure_legacy_schema_compat(conn)
+        _migrate_legacy_signature_files(conn)
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute(
                 "INSERT INTO medications (name) VALUES (%s) ON CONFLICT DO NOTHING",
                 (med,)
             )
 
-        cur = conn.execute("SELECT count(*) FROM signatories")
-        row = cur.fetchone()
-        if row and row['count'] == 0:
-            conn.execute(
-                "INSERT INTO signatories (name, designation) VALUES (%s, %s)",
-                ("Dr. John Doe", "MBBS, MD (Nephrology)")
-            )
-            conn.execute(
-                "INSERT INTO signatories (name, designation) VALUES (%s, %s)",
-                ("Dr. Jane Smith", "MBBS, MS (Transplant Surgery)")
-            )
+        _seed_default_signatories(conn)
         conn.commit()
         if default_duration_options is None:
             return None
@@ -811,6 +928,50 @@ def save_duration_options(options: list):
         )
 
 
+def load_report_print_config() -> dict:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'report_print_config'"
+        ).fetchone()
+    config = DEFAULT_REPORT_PRINT_CONFIG.copy()
+    if row:
+        try:
+            saved = json.loads(row['value'] or "{}")
+            if isinstance(saved, dict):
+                config.update(saved)
+        except (TypeError, ValueError):
+            pass
+    if config.get("mode") not in {"normal", "custom"}:
+        config["mode"] = DEFAULT_REPORT_PRINT_CONFIG["mode"]
+        config["custom_top_gap_cm"] = DEFAULT_REPORT_PRINT_CONFIG["custom_top_gap_cm"]
+    try:
+        gap = float(config.get("custom_top_gap_cm", DEFAULT_REPORT_PRINT_CONFIG["custom_top_gap_cm"]))
+    except (TypeError, ValueError):
+        gap = DEFAULT_REPORT_PRINT_CONFIG["custom_top_gap_cm"]
+    config["custom_top_gap_cm"] = max(0.0, min(gap, 10.0))
+    return config
+
+
+def save_report_print_config(config: dict):
+    mode = config.get("mode", DEFAULT_REPORT_PRINT_CONFIG["mode"])
+    if mode not in {"normal", "custom"}:
+        mode = DEFAULT_REPORT_PRINT_CONFIG["mode"]
+    try:
+        gap = float(config.get("custom_top_gap_cm", DEFAULT_REPORT_PRINT_CONFIG["custom_top_gap_cm"]))
+    except (TypeError, ValueError):
+        gap = DEFAULT_REPORT_PRINT_CONFIG["custom_top_gap_cm"]
+    saved = {
+        "mode": mode,
+        "custom_top_gap_cm": max(0.0, min(gap, 10.0)),
+    }
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO app_settings (key, value) VALUES ('report_print_config', %s)
+               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+            (json.dumps(saved),)
+        )
+
+
 def load_medications() -> list:
     with _connect() as conn:
         rows = conn.execute("SELECT name FROM medications ORDER BY lower(name) ASC").fetchall()
@@ -851,9 +1012,14 @@ def delete_medication(name: str):
         conn.execute("DELETE FROM medications WHERE name = %s", (name,))
 
 
-def load_signatories() -> list:
+def load_signatories(include_inactive: bool = False) -> list:
     with _connect() as conn:
-        rows = conn.execute("SELECT * FROM signatories ORDER BY id DESC").fetchall()
+        if include_inactive:
+            rows = conn.execute("SELECT * FROM signatories ORDER BY id DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM signatories WHERE is_active = TRUE ORDER BY id DESC"
+            ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -871,39 +1037,53 @@ def is_signatory_phone_exists(phone: str, exclude_id: int = None) -> bool:
     with _connect() as conn:
         if exclude_id:
             row = conn.execute(
-                "SELECT 1 FROM signatories WHERE phone = %s AND id != %s", (phone, exclude_id)
+                "SELECT 1 FROM signatories WHERE phone = %s AND id != %s AND is_active = TRUE",
+                (phone, exclude_id)
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT 1 FROM signatories WHERE phone = %s", (phone,)
+                "SELECT 1 FROM signatories WHERE phone = %s AND is_active = TRUE",
+                (phone,)
             ).fetchone()
         return row is not None
 
 
 def add_signatory(name: str, designation: str, signature_path: str = None,
-                  type: str = 'doctor', phone: str = None) -> int:
+                  type: str = 'doctor', phone: str = None,
+                  signature_data: bytes | None = None,
+                  signature_mime: str | None = None) -> int:
     with _connect() as conn:
         cur = conn.execute(
-            """INSERT INTO signatories (name, designation, signature_path, type, phone)
-               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (name, designation, signature_path, type, phone)
+            """INSERT INTO signatories
+               (name, designation, signature_path, signature_data, signature_mime, type, phone)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+            (name, designation, signature_path, psycopg2.Binary(signature_data) if signature_data else None,
+             signature_mime, type, phone)
         )
         return cur.fetchone()['id']
 
 
 def update_signatory(signatory_id: int, name: str, designation: str,
-                     signature_path: str = None, type: str = 'doctor', phone: str = None):
+                     signature_path: str = None, type: str = 'doctor', phone: str = None,
+                     signature_data: bytes | None = None,
+                     signature_mime: str | None = None):
     with _connect() as conn:
         conn.execute(
             """UPDATE signatories
-               SET name = %s, designation = %s, signature_path = %s, type = %s, phone = %s
+               SET name = %s, designation = %s, signature_path = %s,
+                   signature_data = %s, signature_mime = %s, type = %s, phone = %s
                WHERE id = %s""",
-            (name, designation, signature_path, type, phone, signatory_id)
+            (name, designation, signature_path,
+             psycopg2.Binary(signature_data) if signature_data else None,
+             signature_mime, type, phone, signatory_id)
         )
 
 
-def delete_signatory(signatory_id: int):
+def set_signatory_active(signatory_id: int, is_active: bool):
     with _connect() as conn:
-        conn.execute("DELETE FROM signatories WHERE id = %s", (signatory_id,))
+        conn.execute(
+            "UPDATE signatories SET is_active = %s WHERE id = %s",
+            (is_active, signatory_id)
+        )
 
 

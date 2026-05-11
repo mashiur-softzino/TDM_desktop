@@ -10,7 +10,6 @@ matplotlib.use("Agg")
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-from scipy.interpolate import CubicSpline
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -107,26 +106,29 @@ def build_report_widget(patient, pk, interp, times, concs):
     return w
 
 
-def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None, graph_uri=None, title="TDM Report"):
+def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None,
+                      graph_uri=None, title="TDM Report", print_config=None):
     def fmt(v, d=3):
         return f"{v:.{d}f}" if v is not None else "N/A"
 
     def label_with_colon(label):
         return f"{str(label).rstrip(':').strip()} :"
 
-    def result_row(left_label, left_value, right_label=None, right_value=None):
+    def result_row(left_label, left_value, right_label=None, right_value=None, right_value_html=None):
         right_html = ""
-        if right_label and right_value is not None:
+        if right_label and (right_value is not None or right_value_html is not None):
+            value_html = right_value_html if right_value_html is not None else escape(str(right_value))
             right_html = (
                 f'<div class="result-col"><span class="r-label">{escape(label_with_colon(right_label))}</span>'
-                f'<span class="r-value">{escape(str(right_value))}</span></div>'
+                f'<span class="r-value">{value_html}</span></div>'
             )
-        return (
-            f'<div class="result-line">'
-            f'<div class="result-col"><span class="r-label">{escape(label_with_colon(left_label))}</span>'
-            f'<span class="r-value">{escape(str(left_value))}</span></div>'
-            f'{right_html}</div>'
-        )
+        left_html = ""
+        if left_label or left_value:
+            left_html = (
+                f'<div class="result-col"><span class="r-label">{escape(label_with_colon(left_label))}</span>'
+                f'<span class="r-value">{escape(str(left_value))}</span></div>'
+            )
+        return f'<div class="result-line">{left_html or "<div></div>"}{right_html or "<div></div>"}</div>'
 
     def detail_row(left_label, left_value, right_label=None, right_value=None):
         right = ""
@@ -143,8 +145,27 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
             '</div>'
         )
 
-    def img_to_base64(path_str):
-        if not path_str: return None
+    def triple_row(items):
+        cols = []
+        for label, value in items:
+            cols.append(
+                f'<div class="triple-col"><span class="grid-label">{escape(label_with_colon(label))}</span>'
+                f'<span class="grid-value">{escape(str(value))}</span></div>'
+            )
+        while len(cols) < 3:
+            cols.append('<div class="triple-col"></div>')
+        return f'<div class="triple-row">{"".join(cols)}</div>'
+
+    def img_to_base64(path_str=None, image_data=None, mime_type=None):
+        if image_data:
+            try:
+                raw = bytes(image_data)
+                mime = mime_type or "image/png"
+                return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+            except Exception:
+                return None
+        if not path_str:
+            return None
         path = Path(path_str)
         if not path.exists(): return None
         try:
@@ -154,7 +175,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
             return None
 
     def graph_data_uri():
-        fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=170)
+        fig, ax = plt.subplots(figsize=(7.6, 2.8), dpi=170)
         plot_times = np.array(times, dtype=float)
         plot_concs = np.array(concs, dtype=float)
         ax.set_facecolor("white")
@@ -164,18 +185,13 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         ax.spines["left"].set_color("#E8ECF0")
         ax.spines["bottom"].set_color("#E8ECF0")
 
-        if len(plot_times) >= 3:
-            cs = CubicSpline(plot_times, plot_concs)
-            t_fine = np.linspace(plot_times[0], plot_times[-1], 500)
-            c_fine = np.clip(cs(t_fine), 0, None)
-        else:
-            t_fine = plot_times
-            c_fine = plot_concs
+        t_fine = plot_times
+        c_fine = plot_concs
 
+        norm = plt.Normalize(t_fine[0], t_fine[-1] if t_fine[-1] != t_fine[0] else t_fine[0] + 1)
         points = np.array([t_fine, c_fine]).T.reshape(-1, 1, 2)
         segs = np.concatenate([points[:-1], points[1:]], axis=1)
-        norm = plt.Normalize(t_fine[0], t_fine[-1])
-        lc = LineCollection(segs, cmap='rainbow', norm=norm, linewidth=2.8, zorder=3)
+        lc = LineCollection(segs, cmap='rainbow', norm=norm, linewidth=2.6, zorder=3)
         lc.set_array(t_fine)
         ax.add_collection(lc)
 
@@ -183,13 +199,12 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         t_segs = np.linspace(t_fine[0], t_fine[-1], n_fill + 1)
         for i in range(n_fill):
             ts = t_segs[i:i + 2]
-            cs_seg = np.clip(cs(ts), 0, None) if len(plot_times) >= 3 else np.interp(ts, plot_times, plot_concs)
-            col = plt.cm.rainbow(norm(t_segs[i]))
-            ax.fill_between(ts, 0, cs_seg, color=col, alpha=0.18, zorder=1)
+            cs_seg = np.interp(ts, plot_times, plot_concs)
+            ax.fill_between(ts, 0, cs_seg, color=plt.cm.rainbow(norm(t_segs[i])), alpha=0.18, zorder=1)
 
         dot_colors = plt.cm.rainbow(np.linspace(0, 1, len(plot_times)))
-        for t, c, col in zip(plot_times, plot_concs, dot_colors):
-            ax.scatter(t, c, color=col, s=60, zorder=5, edgecolors='white', linewidth=1.8)
+        ax.scatter(plot_times, plot_concs, color=dot_colors, s=42, zorder=5,
+                   edgecolors='white', linewidth=1.4)
 
         ax.annotate(
             'Trough', (plot_times[0], plot_concs[0]),
@@ -198,14 +213,14 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
             arrowprops=dict(arrowstyle='-', color='#E53935', lw=1)
         )
 
-        ax.set_xlim(left=max(-0.15, plot_times[0] - 0.2), right=max(plot_times[-1], 7))
+        ax.set_xlim(left=0, right=plot_times[-1])
         ax.set_xticks(plot_times)
         ax.set_xticklabels([f"{int(t * 60)}" for t in plot_times])
         ax.set_ylim(bottom=0)
         ax.set_xlabel("Time (min)", fontsize=10, fontweight="bold")
         ax.set_ylabel("Conc.(μg/ml)", fontsize=10, fontweight="bold")
-        ax.set_title("Concentration-Time Curve", fontsize=12, fontweight='bold', pad=12)
-        fig.tight_layout()
+        ax.set_title("Concentration-Time Graph", fontsize=12, fontweight='bold', pad=12)
+        fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.24)
         buf = BytesIO()
         fig.savefig(buf, format="png", facecolor="white", bbox_inches="tight")
         plt.close(fig)
@@ -229,25 +244,39 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         '<div class="report-shell">',
         '<div class="header-box">',
         '<div class="header-top">CLINICAL PHARMACOLOGY UNIT</div>',
-        '<div class="header-subline">Therapeutic Drug Monitoring Report</div>',
         '</div>',
         '<div class="patient-box">',
         '<div class="meta-grid">',
-        detail_row("Patient Name", patient.get('name', 'N/A'), "Age (years)", patient.get('age', 'N/A')),
-        detail_row("Gender", patient.get('sex', 'N/A'), "Referred By", patient.get('dept', 'N/A')),
-        detail_row("Invoice Number", patient.get('invoice_number', 'N/A'), "Invoice Date", patient.get('invoice_date', 'N/A')),
-        detail_row("Report Number", patient.get('report_number', 'N/A'), "Delivery Date", patient.get('delivery_date', 'N/A')),
+        triple_row([
+            ("Patient Name", patient.get('name', 'N/A')),
+            ("Age (years)", patient.get('age', 'N/A')),
+            ("Gender", patient.get('sex', 'N/A')),
+        ]),
+        triple_row([
+            ("Referred By", patient.get('dept', 'N/A')),
+            ("Invoice Number", patient.get('invoice_number', 'N/A')),
+            ("Invoice Date", patient.get('invoice_date', 'N/A')),
+        ]),
+        triple_row([
+            ("Report Number", patient.get('report_number', 'N/A')),
+            ("Delivery Date", patient.get('delivery_date', 'N/A')),
+        ]),
+        '<div class="patient-divider"></div>',
         detail_row("Date of Transplant", patient.get('tx_date', 'N/A'), "Diagnosis", patient.get('diag', 'N/A')),
-        f'<div class="single-row full-row patient-full-row"><span class="grid-label">{escape(label_with_colon("Medication"))}</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
+        f'<div class="single-row full-row patient-full-row compact-row"><span class="grid-label">{escape(label_with_colon("Medication"))}</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
         '</div>',
         '</div>',
         '<div class="section-block">',
         '<div class="section-title">Drug &amp; Sampling</div>',
         detail_row("Requested Drug", patient.get('drug', 'N/A'), "Requested Drug Preparation", patient.get('preparation', 'N/A')),
         detail_row("Dose of Requested Drug", patient.get('dose', 'N/A')),
-        detail_row("Date and Time of Dose", patient.get('dose_dt', 'N/A')),
-        detail_row("Date of Sample Collection", patient.get('sample_collection_date', 'N/A')),
-        f'<div class="single-row full-row"><span class="grid-label">{escape(label_with_colon("Time of sample(s)"))}</span><span class="grid-value">{escape(times_str)}</span></div>',
+        detail_row(
+            "Date and Time of Dose",
+            patient.get('dose_dt', 'N/A'),
+            "Date of Sample Collection",
+            patient.get('sample_collection_date', 'N/A'),
+        ),
+        f'<div class="single-row full-row compact-row"><span class="grid-label">{escape(label_with_colon("Time of sample(s)"))}</span><span class="grid-value">{escape(times_str)}</span></div>',
         '</div>',
         '<div class="section-block">',
         '<div class="section-title result-title">Result:</div>',
@@ -263,20 +292,25 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         sections += [
             result_row("Trough Concentration", f"{fmt(pk['c_trough'], 2)} \u03bcg/mL",
                        auc_label, f"{auc_display} mg.h/L"),
-            result_row(f"{last_hr} hr Concentration", f"{fmt(pk['c_last'], 2)} \u03bcg/mL"),
+            result_row(
+                f"{last_hr} hr Concentration",
+                f"{fmt(pk['c_last'], 2)} \u03bcg/mL",
+                "Interpretation",
+                right_value_html=f'<span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span>',
+            ),
         ]
     else:
         sections += [
             result_row("MPA AUC\u2080\u208b\u2081\u2082", f"{fmt(pk['auc_0_12'])} mg.h/L"),
+            result_row(
+                "",
+                "",
+                "Interpretation",
+                right_value_html=f'<span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span>',
+            ),
         ]
-    sections += [
-        f'<div class="result-line result-line-interpretation">'
-        f'<div class="result-col result-interpretation"><strong>{escape(label_with_colon("Interpretation"))}</strong> <span style="color:{interp_color}; font-weight:700;">{escape(interp)}</span></div>'
-        f'<div></div>'
-        f'</div>',
-    ]
     if graph_uri:
-        sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Curve"></div>')
+        sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Graph"></div>')
     sections += [
         f'<div class="range-note"><strong>{escape(label_with_colon("Therapeutic Range"))}</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
         '</div>', # end section-block
@@ -288,7 +322,11 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         box_class = "sig-box sig-box-right" if i == 1 else "sig-box"
         sig_html += f'<div class="{box_class}">'
         if doctor:
-            sig_b64 = img_to_base64(doctor.get('signature_path'))
+            sig_b64 = img_to_base64(
+                doctor.get('signature_path'),
+                doctor.get('signature_data'),
+                doctor.get('signature_mime'),
+            )
             if sig_b64:
                 sig_html += f'<div class="sig-img-wrap"><img src="{sig_b64}"></div>'
             else:
@@ -312,6 +350,16 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         '</div>', # end report-shell
     ]
 
+    config = print_config or {}
+    mode = config.get("mode", "custom")
+    if mode == "custom":
+        try:
+            print_top_padding = f"{max(0.0, min(float(config.get('custom_top_gap_cm', 2.3)), 10.0)):.2f}cm"
+        except (TypeError, ValueError):
+            print_top_padding = "2.30cm"
+    else:
+        print_top_padding = "12px"
+
     body = "\n".join(sections)
     return f"""<!doctype html>
 <html>
@@ -328,11 +376,15 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .patient-box {{ border:2px solid #111; border-radius:14px; padding:12px 16px 12px; margin-bottom:14px; }}
     .section-block {{ margin-top:10px; }}
     .meta-grid {{ display:flex; flex-direction:column; gap:3px; }}
+    .triple-row {{ display:grid; grid-template-columns: 1.2fr 1fr 1fr; gap:12px; line-height:1.22; font-size:12px; }}
+    .triple-col {{ display:flex; gap:6px; align-items:flex-start; min-width:0; }}
     .grid-pair {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }}
     .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.22; font-size:12px; }}
     .grid-label {{ width:auto; font-weight:700; white-space:nowrap; }}
     .grid-value {{ flex:1; }}
+    .patient-divider {{ border-top:1px solid #111; margin:5px 0 4px; }}
     .single-row {{ margin-top:6px; }}
+    .compact-row {{ margin-top:0; }}
     .full-row .grid-value {{ white-space: nowrap; }}
     .patient-full-row .grid-value {{ white-space: normal; }}
     .section-title {{ font-size:12px; font-weight:700; margin:12px 0 6px; }}
@@ -343,26 +395,28 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     .r-value {{ font-weight:700; white-space:nowrap; }}
     .result-line-interpretation {{ margin-top:0; }}
     .result-interpretation {{ font-size:12px; }}
-    .graph-wrap {{ margin:12px auto 10px; text-align:center; border-top:1px solid #DDD; padding-top:10px; }}
-    .graph-wrap img {{ width:650px; max-width:100%; height:auto; }}
-    .range-note {{ margin-top:14px; font-size:12px; line-height:1.4; }}
+    .graph-wrap {{ margin:10px auto 8px; text-align:center; border-top:1px solid #DDD; padding-top:8px; }}
+    .graph-wrap img {{ display:block; width:720px; max-width:100%; height:auto; max-height:235px; object-fit:contain; margin:0 auto; }}
+    .range-note {{ margin-top:12px; font-size:12px; line-height:1.4; }}
     
-    .signature-container {{ margin-top:30px; display:flex; justify-content:space-between; padding:0 10px; }}
+    .signature-container {{ margin-top:16px; display:flex; justify-content:space-between; padding:0 10px; }}
     .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
     .sig-box-right {{ text-align:right; align-items:flex-end; }}
     .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
     .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
-    .doc-name {{ font-weight:700; font-size:16px; margin-bottom:2px; color:#000; line-height:1.2; }}
+    .doc-name {{ font-weight:700; font-size:13px; margin-bottom:2px; color:#000; line-height:1.2; }}
     .doc-desc {{ font-size:12px; color:#111; line-height:1.35; }}
     
     .footer {{ margin-top:20px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
     @media print {{
       body {{ margin:0; }}
-      .page {{ width:auto; margin:0; padding:12px 12px; }}
+      .page {{ width:auto; margin:0; padding:{print_top_padding} 12px 12px; }}
       .patient-box {{ border-width:1.5px; }}
       .result-line {{ grid-template-columns: 1fr 1fr; gap:12px; }}
       .result-col {{ display:flex; gap:4px; }}
       .r-label, .r-value {{ white-space:nowrap; }}
+      .graph-wrap {{ margin:8px auto 8px; padding-top:8px; }}
+      .graph-wrap img {{ width:720px; max-height:220px; }}
     }}
   </style>
 </head>

@@ -140,7 +140,7 @@ class ResultsDialog(QDialog):
         self.results_card.body().addLayout(btn_row)
         content_lay.addWidget(self.results_card)
 
-        self.graph_card = Card("Concentration–Time Curve", "mdi6.chart-line", icon_color=BLUE)
+        self.graph_card = Card("Concentration-Time Graph", "mdi6.chart-line", icon_color=BLUE)
         self.canvas = GradientCanvas()
         self.graph_card.body().addWidget(self.canvas)
         content_lay.addWidget(self.graph_card)
@@ -785,7 +785,7 @@ class PatientsListCard(Card):
 
 class SignatoryRow(QFrame):
     edit_requested = pyqtSignal(dict)
-    delete_requested = pyqtSignal(dict)
+    status_changed = pyqtSignal(dict, bool)
 
     def __init__(self, signatory, serial_no=1):
         super().__init__()
@@ -852,6 +852,39 @@ class SignatoryRow(QFrame):
         phone_lbl.setStyleSheet(f"color: {BLUE if phone else '#94A3B8'}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
         lay.addWidget(phone_lbl, 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+        # Status
+        is_active = signatory.get('is_active', True) is not False
+        status_btn = QPushButton("Active" if is_active else "Inactive")
+        status_btn.setCheckable(True)
+        status_btn.setChecked(is_active)
+        status_btn.setFixedSize(86, 32)
+        status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        status_btn.setStyleSheet("""
+            QPushButton {
+                background: #FEE2E2;
+                color: #B91C1C;
+                border: 1px solid #FCA5A5;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 800;
+            }
+            QPushButton:checked {
+                background: #DCFCE7;
+                color: #15803D;
+                border: 1px solid #86EFAC;
+            }
+            QPushButton:hover {
+                border-color: #64748B;
+            }
+        """)
+
+        def on_status_toggled(checked):
+            status_btn.setText("Active" if checked else "Inactive")
+            self.status_changed.emit(signatory, checked)
+
+        status_btn.toggled.connect(on_status_toggled)
+        lay.addWidget(status_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
         # Actions
         actions = QHBoxLayout()
         actions.setSpacing(8)
@@ -870,10 +903,9 @@ class SignatoryRow(QFrame):
             return btn
 
         actions.addWidget(make_act_btn("mdi6.pencil-outline", BLUE, "#EFF6FF", "#DBEAFE", lambda: self.edit_requested.emit(signatory)))
-        actions.addWidget(make_act_btn("mdi6.trash-can-outline", RED, "#FEF2F2", "#FEE2E2", lambda: self.delete_requested.emit(signatory)))
         
         actions_widget = QWidget()
-        actions_widget.setFixedWidth(100)
+        actions_widget.setFixedWidth(64)
         actions_widget.setStyleSheet("background: transparent; border: none;")
         actions_widget_lay = QHBoxLayout(actions_widget)
         actions_widget_lay.setContentsMargins(0, 0, 0, 0)
@@ -983,6 +1015,7 @@ class SignatoriesListCard(Card):
             ("SL NO", 1, Qt.AlignmentFlag.AlignCenter),
             ("NAME & TYPE", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             ("PHONE", 4, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ("STATUS", 0, Qt.AlignmentFlag.AlignCenter),
             ("ACTIONS", 0, Qt.AlignmentFlag.AlignCenter),
         ]
         for text, stretch, alignment in header_columns:
@@ -992,8 +1025,8 @@ class SignatoriesListCard(Card):
                 "font-size: 11px; font-weight: bold; color: #6B7C93; "
                 "letter-spacing: 1.1px; background: transparent;"
             )
-            if text == "ACTIONS":
-                lbl.setFixedWidth(100)
+            if text in ("STATUS", "ACTIONS"):
+                lbl.setFixedWidth(86 if text == "STATUS" else 64)
                 hdr_lay.addWidget(lbl, 0, alignment)
             else:
                 hdr_lay.addWidget(lbl, stretch)

@@ -1,7 +1,6 @@
 import os
-import shutil
 import tempfile
-from datetime import datetime
+import mimetypes
 from pathlib import Path
 
 import qtawesome as qta
@@ -15,8 +14,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -24,214 +21,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app_paths import ensure_data_dirs
 from database import (
     add_signatory,
-    delete_signatory,
     is_signatory_phone_exists,
-    load_signatories,
     update_signatory,
 )
 from tdm_validators import validate_signature_file, is_valid_phone
 from ui_constants import BLUE, BORDER, TEXT_CLR, small_label
-from ui_widgets import ConfirmActionModal, ToastMessage
-
-
-class SignatoryManagementModal(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Manage Signatories")
-        self.setFixedWidth(550)
-        self.setFixedHeight(600)
-        self.setModal(True)
-        self.setStyleSheet(
-            """
-            QDialog {
-                background: white;
-                border-radius: 20px;
-            }
-            """
-        )
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-
-        banner = QFrame()
-        banner.setStyleSheet(
-            """
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #1E293B, stop:1 #334155);
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
-            """
-        )
-        banner_lay = QHBoxLayout(banner)
-        banner_lay.setContentsMargins(24, 20, 24, 20)
-        banner_lay.setSpacing(14)
-
-        icon_lbl = QLabel()
-        icon_lbl.setFixedSize(40, 40)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setPixmap(qta.icon("mdi6.account-cog", color="white").pixmap(22, 22))
-        icon_lbl.setStyleSheet("background: rgba(255,255,255,0.15); border-radius: 20px;")
-        banner_lay.addWidget(icon_lbl)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(4)
-        t = QLabel("Manage Signatories")
-        t.setStyleSheet("font-size: 16px; font-weight: bold; color: white; background: transparent;")
-        s = QLabel("Configure signatories and technologists for reports")
-        s.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.7); background: transparent;")
-        title_col.addWidget(t)
-        title_col.addWidget(s)
-        banner_lay.addLayout(title_col)
-        banner_lay.addStretch()
-
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(255,255,255,0.1); color: white;
-                border: none; border-radius: 15px; font-size: 18px; font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(255,255,255,0.2); }
-            """
-        )
-        close_btn.clicked.connect(self.reject)
-        banner_lay.addWidget(close_btn)
-        lay.addWidget(banner)
-
-        body = QVBoxLayout()
-        body.setContentsMargins(24, 24, 24, 24)
-        body.setSpacing(18)
-
-        self.list_widget = QListWidget()
-        self.list_widget.setSpacing(6)
-        self.list_widget.setStyleSheet(
-            f"""
-            QListWidget {{
-                background: #F8FAFC;
-                border: 1.5px solid #E2E8F0;
-                border-radius: 16px;
-                padding: 10px;
-                outline: none;
-            }}
-            QListWidget::item {{
-                background: white;
-                border: 1px solid #F1F5F9;
-                border-radius: 12px;
-                padding: 12px;
-                color: {TEXT_CLR};
-                margin-bottom: 2px;
-            }}
-            QListWidget::item:hover {{
-                background: #F1F5F9;
-            }}
-            QListWidget::item:selected {{
-                background: #EFF6FF;
-                border: 1.5px solid #3B82F6;
-                color: #2563EB;
-            }}
-            """
-        )
-        body.addWidget(self.list_widget)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
-
-        add_btn = QPushButton("Add New Signatory")
-        add_btn.setFixedHeight(40)
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: #16A34A; color: white; border: none; border-radius: 10px;
-                padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #15803D; }
-            """
-        )
-        add_btn.clicked.connect(self._add_signatory)
-
-        edit_btn = QPushButton("Edit")
-        edit_btn.setFixedHeight(40)
-        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: #F1F5F9; color: #475569; border: 1.5px solid #E2E8F0;
-                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #E2E8F0; }
-            """
-        )
-        edit_btn.clicked.connect(self._edit_signatory)
-
-        del_btn = QPushButton("Delete")
-        del_btn.setFixedHeight(40)
-        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        del_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: #FEF2F2; color: #DC2626; border: 1.5px solid #FEE2E2;
-                border-radius: 10px; padding: 0 16px; font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: #DC2626; color: white; border-color: #B91C1C; }
-            """
-        )
-        del_btn.clicked.connect(self._delete_signatory)
-
-        btn_row.addWidget(add_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(edit_btn)
-        btn_row.addWidget(del_btn)
-        body.addLayout(btn_row)
-
-        wrapper = QFrame()
-        wrapper.setLayout(body)
-        lay.addWidget(wrapper)
-        self._refresh_list()
-
-    def _refresh_list(self):
-        self.list_widget.clear()
-        for signatory in reversed(load_signatories()):
-            item = QListWidgetItem(f"{signatory['name']} ({signatory['designation'] or 'No designation'})")
-            item.setData(Qt.ItemDataRole.UserRole, signatory)
-            self.list_widget.addItem(item)
-
-    def _add_signatory(self):
-        dlg = SignatoryEditModal(parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_list()
-
-    def _edit_signatory(self):
-        item = self.list_widget.currentItem()
-        if not item:
-            return
-        signatory = item.data(Qt.ItemDataRole.UserRole)
-        dlg = SignatoryEditModal(signatory, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_list()
-
-    def _delete_signatory(self):
-        item = self.list_widget.currentItem()
-        if not item:
-            return
-        signatory = item.data(Qt.ItemDataRole.UserRole)
-        dlg = ConfirmActionModal(
-            "Delete Signatory",
-            f"Are you sure you want to delete \"{signatory['name']}\" from the Signatory List?",
-            confirm_label="Yes",
-            cancel_label="No",
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        delete_signatory(signatory['id'])
-        self._refresh_list()
+from ui_widgets import ToastMessage
 
 
 class SignatoryEditModal(QDialog):
@@ -352,7 +149,7 @@ class SignatoryEditModal(QDialog):
         self.phone_edit = QLineEdit(signatory.get("phone", "") if signatory else "")
         self.phone_edit.setPlaceholderText("e.g. 01XXXXXXXXX")
         self.phone_edit.setMaxLength(11)
-        self.phone_edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self.phone_edit))
+        self.phone_edit.setValidator(QRegularExpressionValidator(QRegularExpression(r"(?:|0|01\d{0,9})"), self.phone_edit))
         self.phone_edit.setStyleSheet(self._input_style())
         phone_sec.addWidget(self.phone_edit)
         phone_sec.addStretch()
@@ -376,6 +173,8 @@ class SignatoryEditModal(QDialog):
         self.sig_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sig_label.setStyleSheet("background: transparent; color: #94A3B8; font-size: 11px;")
         self.sig_path = signatory["signature_path"] if signatory else None
+        self.sig_data = bytes(signatory.get("signature_data") or b"") if signatory else b""
+        self.sig_mime = signatory.get("signature_mime") if signatory else None
         sig_box_lay.addWidget(self.sig_label)
         sig_row.addWidget(sig_box, 2)
 
@@ -412,7 +211,7 @@ class SignatoryEditModal(QDialog):
             """
         )
         self.remove_sig_btn.clicked.connect(self._remove_sig)
-        self.remove_sig_btn.setVisible(bool(self.sig_path))
+        self.remove_sig_btn.setVisible(bool(self.sig_path or self.sig_data))
         sig_actions.addWidget(self.remove_sig_btn)
         sig_actions.addStretch()
         sig_row.addLayout(sig_actions, 1)
@@ -546,24 +345,27 @@ class SignatoryEditModal(QDialog):
         if error:
             self._show_error("File Error" if "read" in error.lower() else "File Too Large", error)
             return
-        sig_dir = ensure_data_dirs() / "signatures"
-        ext = Path(file_path).suffix
-        dest_name = f"sig_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
-        dest_path = sig_dir / dest_name
         try:
-            shutil.copy2(file_path, dest_path)
-            self.sig_path = str(dest_path)
+            self.sig_data = Path(file_path).read_bytes()
+            self.sig_mime = mimetypes.guess_type(file_path)[0] or "image/png"
+            self.sig_path = None
             self._update_sig_preview()
         except Exception as exc:
-            QMessageBox.critical(self, "Error", f"Failed to copy signature: {exc}")
+            QMessageBox.critical(self, "Error", f"Failed to load signature: {exc}")
 
     def _remove_sig(self):
         self.sig_path = None
+        self.sig_data = b""
+        self.sig_mime = None
         self._update_sig_preview()
 
     def _update_sig_preview(self):
-        if self.sig_path and Path(self.sig_path).exists():
+        pix = QPixmap()
+        if self.sig_data:
+            pix.loadFromData(self.sig_data)
+        elif self.sig_path and Path(self.sig_path).exists():
             pix = QPixmap(self.sig_path)
+        if not pix.isNull():
             self.sig_label.setPixmap(
                 pix.scaled(
                     self.sig_label.size(),
@@ -575,7 +377,7 @@ class SignatoryEditModal(QDialog):
         else:
             self.sig_label.setPixmap(QPixmap())
             self.sig_label.setText("No Signature Uploaded")
-        self.remove_sig_btn.setVisible(bool(self.sig_path))
+        self.remove_sig_btn.setVisible(bool(self.sig_path or self.sig_data))
 
     def _save(self):
         name = self.name_edit.text().strip()
@@ -590,15 +392,25 @@ class SignatoryEditModal(QDialog):
             self._show_error("Phone Required", "Please enter phone number.")
             return
         if not is_valid_phone(phone):
-            self._show_error("Invalid Phone", "Please enter a valid 11-digit phone number.")
+            self._show_error("Invalid Phone", "Phone number must be 11 digits and start with 01.")
             return
         if is_signatory_phone_exists(phone, exclude_id=self.signatory["id"] if self.signatory else None):
             self._show_error("Duplicate Phone", "This phone number is already registered.")
             return
 
         if self.signatory:
-            update_signatory(self.signatory["id"], name, desc, self.sig_path, type=type_str, phone=phone)
+            update_signatory(
+                self.signatory["id"], name, desc, self.sig_path,
+                type=type_str, phone=phone,
+                signature_data=self.sig_data or None,
+                signature_mime=self.sig_mime,
+            )
         else:
-            add_signatory(name, desc, self.sig_path, type=type_str, phone=phone)
+            add_signatory(
+                name, desc, self.sig_path,
+                type=type_str, phone=phone,
+                signature_data=self.sig_data or None,
+                signature_mime=self.sig_mime,
+            )
         self.accept()
 

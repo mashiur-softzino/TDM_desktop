@@ -5,7 +5,7 @@ MAX_SIGNATURE_SIZE_BYTES = 2 * 1024 * 1024
 
 
 def is_valid_phone(phone: str) -> bool:
-    return phone.isdigit() and len(phone) == 11
+    return phone.isdigit() and len(phone) == 11 and phone.startswith("01")
 
 
 def is_valid_direct_auc(text: str) -> bool:

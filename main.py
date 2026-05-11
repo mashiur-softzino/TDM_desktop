@@ -98,7 +98,11 @@ def main():
             pass
 
     app = QApplication(sys.argv)
-    app_icon = QIcon(_asset_path("tdm_logo.ico"))
+    app_icon = QIcon(_asset_path("tdm_logo_icon.png"))
+    if app_icon.isNull():
+        app_icon = QIcon(_asset_path("tdm_logo.png"))
+    if app_icon.isNull():
+        app_icon = QIcon(_asset_path("tdm_logo.ico"))
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
     splash = _make_splash(app)

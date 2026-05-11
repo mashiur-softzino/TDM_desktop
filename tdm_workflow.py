@@ -1,8 +1,6 @@
-import base64
 import re
 import webbrowser
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 
 from PyQt6.QtCore import QDate, QDateTime, Qt
@@ -17,7 +15,7 @@ from app_logger import (
     log_report_printed,
 )
 from calculations import calculate_auc_full, calculate_lss_auc, canonical_drug_name, interpret_result
-from database import delete_record, get_signatory_by_id, load_all, save_record
+from database import delete_record, get_signatory_by_id, load_all, load_report_print_config, save_record
 from tdm_validators import is_valid_direct_auc, is_valid_phone
 from ui_constants import DEFAULT_DURATION_OPTIONS
 from ui_patients import PatientRow, ResultsDialog
@@ -30,9 +28,22 @@ class TDMWorkflowMixin:
     def _load_saved_patients(self):
         try:
             self._saved_patients, self._drafts = load_all()
-        except Exception:
+            return True
+        except Exception as exc:
+            log_error("_load_saved_patients", exc)
             self._saved_patients = []
             self._drafts = []
+            return False
+
+    def _reload_patient_lists(self, manual=False):
+        ok = self._load_saved_patients()
+        self._refresh_patients_list()
+        if manual:
+            if ok:
+                self._show_toast("List refreshed", "Latest samples and drafts loaded from server.")
+            else:
+                self._show_toast("Refresh failed", "Could not load latest data from server.", tone="error")
+        return ok
 
     def _patient_payload(self):
         d_del = self.f_delivery_date.date()
@@ -239,7 +250,7 @@ class TDMWorkflowMixin:
     def _save_draft(self):
         phone = self.f_phone.text().strip()
         if phone and not is_valid_phone(phone):
-            self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
+            self._show_toast("Invalid Phone", "Phone number must be 11 digits and start with 01.", tone="warning")
             return
         snapshot = self._snapshot_payload()
         snapshot.pop("pk", None)
@@ -438,13 +449,6 @@ class TDMWorkflowMixin:
         self._last_drug = canonical_drug_name(snapshot.get("patient", {}).get("drug", "MPA"))
         self._apply_results(pk, self._last_interp)
 
-    def _capture_report_graph_uri(self):
-        if self._results_dialog is None:
-            return None
-        buf = BytesIO()
-        self._results_dialog.canvas.fig.savefig(buf, format="png", facecolor="white", bbox_inches="tight")
-        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
     def _report_file_stem(self, snapshot):
         patient = snapshot.get("patient", {})
         pid = str(patient.get("pid") or "").strip()
@@ -459,7 +463,7 @@ class TDMWorkflowMixin:
 
         return reports_dir() / f"{self._report_file_stem(snapshot)}.html"
 
-    def _save_report_file(self, snapshot, graph_uri=None):
+    def _save_report_file(self, snapshot):
         try:
             from report_print import build_report_html
 
@@ -477,8 +481,9 @@ class TDMWorkflowMixin:
                 concs=snapshot.get("concs", []),
                 prepared_by=prepared_by,
                 checked_by=checked_by,
-                graph_uri=graph_uri,
+                graph_uri=None,
                 title=self._report_file_stem(snapshot),
+                print_config=load_report_print_config(),
             )
             report_path.write_text(html, encoding="utf-8")
             snapshot["report_path"] = str(report_path)
@@ -499,32 +504,32 @@ class TDMWorkflowMixin:
             return
         report_path = snapshot.get("report_path")
         expected_path = self._expected_report_path(snapshot)
-        if not report_path or not Path(report_path).exists() or Path(report_path).name != expected_path.name:
-            from report_print import build_report_html
+        from report_print import build_report_html
 
-            prep_id = snapshot.get("prepared_by_id")
-            check_id = snapshot.get("checked_by_id")
-            prepared_by = get_signatory_by_id(prep_id) if prep_id else None
-            checked_by = get_signatory_by_id(check_id) if check_id else None
-            html = build_report_html(
-                patient=snapshot.get("patient", {}),
-                pk=snapshot.get("pk", {}),
-                interp=snapshot.get("interp", "N/A"),
-                times=snapshot.get("times", []),
-                concs=snapshot.get("concs", []),
-                prepared_by=prepared_by,
-                checked_by=checked_by,
-                graph_uri=None,
-                title=self._report_file_stem(snapshot),
-            )
-            report_path = str(expected_path)
-            snapshot["report_path"] = report_path
-            try:
-                Path(report_path).write_text(html, encoding="utf-8")
-                if snapshot.get("id"):
-                    save_record(snapshot, snapshot.get("record_type", "sample"))
-            except Exception:
-                pass
+        prep_id = snapshot.get("prepared_by_id")
+        check_id = snapshot.get("checked_by_id")
+        prepared_by = get_signatory_by_id(prep_id) if prep_id else None
+        checked_by = get_signatory_by_id(check_id) if check_id else None
+        html = build_report_html(
+            patient=snapshot.get("patient", {}),
+            pk=snapshot.get("pk", {}),
+            interp=snapshot.get("interp", "N/A"),
+            times=snapshot.get("times", []),
+            concs=snapshot.get("concs", []),
+            prepared_by=prepared_by,
+            checked_by=checked_by,
+            graph_uri=None,
+            title=self._report_file_stem(snapshot),
+            print_config=load_report_print_config(),
+        )
+        report_path = str(expected_path)
+        snapshot["report_path"] = report_path
+        try:
+            Path(report_path).write_text(html, encoding="utf-8")
+            if snapshot.get("id"):
+                save_record(snapshot, snapshot.get("record_type", "sample"))
+        except Exception:
+            pass
 
         if report_path and Path(report_path).exists():
             webbrowser.open(f"file://{Path(report_path).absolute()}")
@@ -565,7 +570,7 @@ class TDMWorkflowMixin:
     def _calculate(self):
         phone = self.f_phone.text().strip()
         if phone and not is_valid_phone(phone):
-            self._show_toast("Invalid Phone", "Please enter a valid 11-digit phone number.", tone="warning")
+            self._show_toast("Invalid Phone", "Phone number must be 11 digits and start with 01.", tone="warning")
             return
 
         if hasattr(self, "_report_snapshot"):
@@ -609,7 +614,7 @@ class TDMWorkflowMixin:
             if getattr(self, "_active_record_source", None) == "draft" and existing_id:
                 delete_record(existing_id)
             save_record(snapshot, "sample")
-            saved_path = self._save_report_file(snapshot, graph_uri=None)
+            saved_path = self._save_report_file(snapshot)
             snapshot["report_path"] = saved_path or ""
             save_record(snapshot, "sample")
             self._report_snapshot = snapshot
@@ -661,7 +666,7 @@ class TDMWorkflowMixin:
         if getattr(self, "_active_record_source", None) == "draft" and existing_id:
             delete_record(existing_id)
         save_record(snapshot, "sample")
-        saved_path = self._save_report_file(snapshot, graph_uri=self._capture_report_graph_uri())
+        saved_path = self._save_report_file(snapshot)
         snapshot["report_path"] = saved_path or ""
         save_record(snapshot, "sample")
         self._report_snapshot = snapshot
@@ -691,7 +696,10 @@ class TDMWorkflowMixin:
         existing_id = getattr(self, "_active_record_id", None)
         if existing_id:
             snapshot["id"] = existing_id
-        report_path = self._save_report_file(snapshot, graph_uri=self._capture_report_graph_uri())
+        report_path = self._save_report_file(snapshot)
+        if not report_path:
+            self._show_toast("Error", "Report file could not be generated.", tone="error")
+            return
         webbrowser.open(Path(report_path).as_uri())
         self._switch_page(1)
         if hasattr(self, "_main_scroll"):

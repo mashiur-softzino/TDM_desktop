@@ -9,7 +9,8 @@ from database import (
     init_db,
     load_duration_options, save_duration_options, load_medications,
     add_medication, update_medication, delete_medication,
-    load_signatories, add_signatory, update_signatory, delete_signatory, get_signatory_by_id
+    load_signatories,
+    set_signatory_active
 )
 import tempfile
 from datetime import datetime
@@ -24,7 +25,7 @@ from ui_widgets import (Card, DurationEditModal, DurationChip,
                         ToastMessage, ConfirmActionModal, AlertModal)
 from ui_sampling import ModernSampleTable, MedicationSelector, GradientCanvas
 from ui_patients import ResultsDialog, PatientRow, PatientsListCard, SignatoryRow, SignatoriesListCard
-from ui_signatory import SignatoryManagementModal, SignatoryEditModal
+from ui_signatory import SignatoryEditModal
 from ui_settings import build_settings_page
 from tdm_validators import is_valid_direct_auc, is_valid_phone
 from tdm_workflow import TDMWorkflowMixin
@@ -47,7 +48,11 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         super().__init__()
         self.setWindowTitle("TDM Report — Therapeutic Drug Monitoring")
         icon_base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-        self.setWindowIcon(QIcon(str(icon_base / "tdm_logo.ico")))
+        for icon_name in ("tdm_logo_icon.png", "tdm_logo.png", "tdm_logo.ico"):
+            icon = QIcon(str(icon_base / icon_name))
+            if not icon.isNull():
+                self.setWindowIcon(icon)
+                break
         self.resize(980, 700)
         self._saved_patients = []
         self._drafts = []
@@ -156,8 +161,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         Builds the heavy sampling card and loads patient/draft data."""
         card = self._make_sampling_card()
         self._sampling_card_container.layout().addWidget(card)
-        self._load_saved_patients()
-        self._refresh_patients_list()
+        self._reload_patient_lists()
         self._update_action_buttons()
 
     def _build_report_page(self):
@@ -360,18 +364,20 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         return build_settings_page(self)
 
 
-    def _add_signatory_from_list(self):
+    def _add_signatory_from_list(self, show_toast=False):
         dlg = SignatoryEditModal(parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._refresh_signatories_list()
             self._refresh_signatory_combos()
+            if show_toast:
+                self._show_toast("Signature added", "New signature is now available in the dropdowns.")
 
     _DOC_PAGE_SIZE = 10
 
     def _refresh_signatories_list(self):
         if not hasattr(self, 'signatory_list_card'): return
         self.signatory_list_card.clear_rows()
-        signatories = load_signatories()
+        signatories = load_signatories(include_inactive=True)
         query = self.signatory_list_card.search_text()
         filtered = [s for s in signatories if query in s['name'].lower() or query in (s.get('phone') or '').lower()]
 
@@ -394,7 +400,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         for i, signatory in enumerate(page_items, start + 1):
             row = SignatoryRow(signatory, serial_no=i)
             row.edit_requested.connect(self._edit_signatory_from_list)
-            row.delete_requested.connect(self._delete_signatory_from_list)
+            row.status_changed.connect(self._set_signatory_status_from_list)
             self.signatory_list_card.add_row(row)
 
         self.signatory_list_card.set_pagination(page_index, page_count, len(visible), self._DOC_PAGE_SIZE)
@@ -405,20 +411,12 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
             self._refresh_signatories_list()
             self._refresh_signatory_combos()
 
-    def _delete_signatory_from_list(self, signatory):
-        dlg = ConfirmActionModal(
-            "Delete Signatory",
-            f"Are you sure you want to delete \"{signatory['name']}\" from the Signatory List?",
-            confirm_label="Yes",
-            cancel_label="No",
-            parent=self,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        delete_signatory(signatory['id'])
+    def _set_signatory_status_from_list(self, signatory, is_active):
+        set_signatory_active(signatory['id'], is_active)
         self._refresh_signatories_list()
         self._refresh_signatory_combos()
-        self._show_toast("Signatory deleted", f"\"{signatory['name']}\" removed from the Signatory List.")
+        status = "activated" if is_active else "deactivated"
+        self._show_toast("Signatory updated", f"\"{signatory['name']}\" {status}.")
 
     def _make_tabs(self):
         wrap = QWidget()
@@ -474,13 +472,34 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
 
         row.addWidget(shell)
         row.addStretch()
+        self.refresh_tab_btn = QPushButton()
+        self.refresh_tab_btn.setToolTip("Refresh current page")
+        self.refresh_tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_tab_btn.setFixedSize(42, 42)
+        self.refresh_tab_btn.setIcon(qta.icon("mdi6.refresh", color="#334155"))
+        self.refresh_tab_btn.setIconSize(QSize(20, 20))
+        self.refresh_tab_btn.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                border: 1.5px solid #FDBA74;
+                border-radius: 12px;
+            }
+            QPushButton:hover {
+                background: #FFF7ED;
+                border-color: #F97316;
+            }
+        """)
+        self.refresh_tab_btn.clicked.connect(self._refresh_current_page)
+        row.addWidget(self.refresh_tab_btn)
         return wrap
 
     def _switch_page(self, index):
         if index == 1 and hasattr(self, 'sample_list_card'):
             self.sample_list_card.clear_search()
+            self._reload_patient_lists()
         elif index == 2 and hasattr(self, 'draft_list_card'):
             self.draft_list_card.clear_search()
+            self._reload_patient_lists()
         elif index == 3 and hasattr(self, 'signatory_list_card'):
             self.signatory_list_card._search_edit.clear()
             self._refresh_signatories_list()
@@ -568,6 +587,25 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.drafts_tab_btn.setStyleSheet(tab_style('draft', index == 2))
         self.signatories_tab_btn.setStyleSheet(tab_style('doctor', index == 3))
         self.settings_tab_btn.setStyleSheet(tab_style('settings', index == 4))
+
+    def _refresh_current_page(self):
+        patients_ok = self._reload_patient_lists(manual=False)
+        signatories_ok = True
+        try:
+            if hasattr(self, "signatory_list_card"):
+                self._refresh_signatories_list()
+                self._refresh_signatory_combos()
+            elif hasattr(self, "prep_by_combo"):
+                self._refresh_signatory_combos()
+        except Exception as exc:
+            signatories_ok = False
+            from app_logger import log_error
+            log_error("_refresh_current_page", exc)
+
+        if patients_ok and signatories_ok:
+            self._show_toast("Data refreshed", "Sample, draft and signatory data loaded from server.")
+        else:
+            self._show_toast("Refresh failed", "Some data could not be loaded from server.", tone="error")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -825,7 +863,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.f_diag.setText("Post Renal Transplant")
         self.f_phone   = field("Enter phone number")
         self.f_phone.setMaxLength(11)
-        self.f_phone.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d{0,11}"), self.f_phone))
+        self.f_phone.setValidator(QRegularExpressionValidator(QRegularExpression(r"(?:|0|01\d{0,9})"), self.f_phone))
         for edit in [self.f_name, self.f_age, self.f_hosp_no, self.f_report_no, self.f_referred_by, self.f_diag, self.f_phone]:
             edit.textChanged.connect(self._on_data_changed)
 
@@ -1504,7 +1542,24 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.checked_by_combo = NoWheelComboBox()
         self.checked_by_combo.setStyleSheet(combo_style)
         self.checked_by_combo.currentIndexChanged.connect(lambda *_: self._on_data_changed())
-        check_col.addWidget(self.checked_by_combo)
+        check_input_row = QHBoxLayout()
+        check_input_row.setSpacing(10)
+        check_input_row.addWidget(self.checked_by_combo, 1)
+        add_sig_btn = QPushButton()
+        add_sig_btn.setFixedSize(48, 48)
+        add_sig_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_sig_btn.setToolTip("Add new signature")
+        add_sig_btn.setIcon(qta.icon("mdi6.plus", color="white"))
+        add_sig_btn.setIconSize(add_sig_btn.size() * 0.52)
+        add_sig_btn.setStyleSheet("""
+            QPushButton {
+                background: #0E9F6E; border: none; border-radius: 14px;
+            }
+            QPushButton:hover { background: #0B8A60; }
+        """)
+        add_sig_btn.clicked.connect(lambda: self._add_signatory_from_list(show_toast=True))
+        check_input_row.addWidget(add_sig_btn, 0, Qt.AlignmentFlag.AlignRight)
+        check_col.addLayout(check_input_row)
         row.addLayout(check_col, 1)
         
         lay.addLayout(row)
@@ -1535,11 +1590,6 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         if select_check_id:
             idx = self.checked_by_combo.findData(select_check_id)
             if idx >= 0: self.checked_by_combo.setCurrentIndex(idx)
-
-    def _manage_signatories(self):
-        dlg = SignatoryManagementModal(self)
-        dlg.exec()
-        self._refresh_signatory_combos()
 
     def _remove_duration_option(self, duration):
         if len(self._duration_options) <= 1:
