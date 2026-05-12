@@ -206,6 +206,9 @@ def _parse_duration_options(value, default_options: list) -> list:
 
 def _ensure_legacy_schema_compat(conn) -> None:
     """Add columns needed by older installed databases."""
+    for table in ("patients", "drafts"):
+        _ensure_ref_by_column(conn, table)
+
     legacy_columns = [
         "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_data BYTEA",
         "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_mime TEXT",
@@ -219,6 +222,32 @@ def _ensure_legacy_schema_compat(conn) -> None:
     ]
     for sql in legacy_columns:
         conn.execute(sql)
+
+
+def _column_exists(conn, table: str, column: str) -> bool:
+    row = conn.execute(
+        """SELECT 1
+           FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND table_name = %s
+             AND column_name = %s""",
+        (table, column),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_ref_by_column(conn, table: str) -> None:
+    if table not in {"patients", "drafts"}:
+        return
+    has_dept = _column_exists(conn, table, "dept")
+    has_ref_by = _column_exists(conn, table, "ref_by")
+    if has_dept and not has_ref_by:
+        conn.execute(f"ALTER TABLE {table} RENAME COLUMN dept TO ref_by")
+    elif not has_ref_by:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN ref_by TEXT")
+    elif has_dept:
+        conn.execute(f"UPDATE {table} SET ref_by = COALESCE(ref_by, dept)")
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN dept")
 
 
 def _migrate_legacy_signature_files(conn) -> None:
@@ -263,7 +292,7 @@ def init_db(default_duration_options: list | None = None):
                 sex            TEXT,
                 invoice_date   TEXT,
                 report_number  TEXT,
-                dept           TEXT,
+                ref_by         TEXT,
                 diagnosis      TEXT,
                 tx_date        TEXT,
                 delivery_date  TEXT,
@@ -353,7 +382,7 @@ def init_db(default_duration_options: list | None = None):
                 invoice_date           TEXT,
                 invoice_number         TEXT,
                 report_number          TEXT,
-                dept                   TEXT,
+                ref_by                 TEXT,
                 diagnosis              TEXT,
                 tx_date                TEXT,
                 delivery_date          TEXT,
@@ -415,6 +444,9 @@ def _generate_pid(conn) -> str:
 
 
 def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None = None) -> int:
+    invoice_no = patient.get('invoice_number', '') or ''
+    invoice_value = invoice_no if invoice_no and invoice_no != 'N/A' else None
+
     if existing_patient_id is not None:
         row = conn.execute(
             "SELECT id FROM patients WHERE id = %s", (existing_patient_id,)
@@ -422,16 +454,18 @@ def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None 
         if row:
             conn.execute(
                 """UPDATE patients
-                   SET name = %s, age = %s, sex = %s, invoice_date = %s, report_number = %s,
-                       dept = %s, diagnosis = %s, tx_date = %s, delivery_date = %s, phone = %s
+                   SET name = %s, age = %s, sex = %s, invoice_date = %s,
+                       invoice_number = %s, report_number = %s, ref_by = %s,
+                       diagnosis = %s, tx_date = %s, delivery_date = %s, phone = %s
                    WHERE id = %s""",
                 (
                     patient.get('name'),
                     patient.get('age'),
                     patient.get('sex'),
                     patient.get('invoice_date'),
+                    invoice_value,
                     patient.get('report_number'),
-                    patient.get('dept'),
+                    patient.get('ref_by'),
                     patient.get('diag'),
                     patient.get('tx_date'),
                     patient.get('delivery_date'),
@@ -441,7 +475,6 @@ def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None 
             )
             return row['id']
 
-    invoice_no = patient.get('invoice_number', '') or ''
     if invoice_no and invoice_no != 'N/A':
         row = conn.execute(
             "SELECT id FROM patients WHERE invoice_number = %s", (invoice_no,)
@@ -449,16 +482,18 @@ def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None 
         if row:
             conn.execute(
                 """UPDATE patients
-                   SET name = %s, age = %s, sex = %s, invoice_date = %s, report_number = %s,
-                       dept = %s, diagnosis = %s, tx_date = %s, delivery_date = %s, phone = %s
+                   SET name = %s, age = %s, sex = %s, invoice_date = %s,
+                       invoice_number = %s, report_number = %s, ref_by = %s,
+                       diagnosis = %s, tx_date = %s, delivery_date = %s, phone = %s
                    WHERE id = %s""",
                 (
                     patient.get('name'),
                     patient.get('age'),
                     patient.get('sex'),
                     patient.get('invoice_date'),
+                    invoice_value,
                     patient.get('report_number'),
-                    patient.get('dept'),
+                    patient.get('ref_by'),
                     patient.get('diag'),
                     patient.get('tx_date'),
                     patient.get('delivery_date'),
@@ -472,18 +507,18 @@ def _get_or_create_patient(conn, patient: dict, existing_patient_id: int | None 
     cur = conn.execute(
         """INSERT INTO patients
                (pid, invoice_number, name, age, sex, invoice_date, report_number,
-                dept, diagnosis, tx_date, delivery_date, phone)
+                ref_by, diagnosis, tx_date, delivery_date, phone)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            RETURNING id""",
         (
             pid,
-            invoice_no if invoice_no and invoice_no != 'N/A' else None,
+            invoice_value,
             patient.get('name'),
             patient.get('age'),
             patient.get('sex'),
             patient.get('invoice_date'),
             patient.get('report_number'),
-            patient.get('dept'),
+            patient.get('ref_by'),
             patient.get('diag'),
             patient.get('tx_date'),
             patient.get('delivery_date'),
@@ -505,7 +540,7 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
         'invoice_number':         record['invoice_number']         or 'N/A',
         'report_number':          record['report_number']          or 'N/A',
         'pid':                    record['pid']                    or 'N/A',
-        'dept':                   record['dept']                   or 'N/A',
+        'ref_by':                 record['ref_by']                 or 'N/A',
         'drug':                   record['drug']                   or '',
         'preparation':            record['preparation']            or '',
         'dose':                   record['dose']                   or '',
@@ -573,7 +608,7 @@ def _draft_row_to_snapshot(row) -> dict:
         'invoice_number':         row['invoice_number']         or 'N/A',
         'report_number':          row['report_number']          or 'N/A',
         'pid':                    'N/A',
-        'dept':                   row['dept']                   or 'N/A',
+        'ref_by':                 row['ref_by']                 or 'N/A',
         'drug':                   row['drug']                   or '',
         'preparation':            row['preparation']            or '',
         'dose':                   row['dose']                   or '',
@@ -644,7 +679,7 @@ def _save_draft(conn, snapshot: dict):
         patient.get('invoice_date'),
         patient.get('invoice_number'),
         patient.get('report_number'),
-        patient.get('dept'),
+        patient.get('ref_by'),
         patient.get('diag'),
         patient.get('tx_date'),
         patient.get('delivery_date'),
@@ -681,7 +716,7 @@ def _save_draft(conn, snapshot: dict):
                    invoice_date           = %s,
                    invoice_number         = %s,
                    report_number          = %s,
-                   dept                   = %s,
+                   ref_by                 = %s,
                    diagnosis              = %s,
                    tx_date                = %s,
                    delivery_date          = %s,
@@ -706,7 +741,7 @@ def _save_draft(conn, snapshot: dict):
         """INSERT INTO drafts
                (saved_at, report_path, sampling_mode, direct_auc, sample_rows_json,
                 duration_options_json, times_json, concs_json, name, age, sex, invoice_date,
-                invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+                invoice_number, report_number, ref_by, diagnosis, tx_date, delivery_date,
                 drug, preparation, dose, dose_dt, sample_collection_date,
                 co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -876,7 +911,7 @@ def load_all() -> tuple[list, list]:
                    r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
                    r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
-                   p.report_number, p.dept, p.diagnosis, p.tx_date, p.delivery_date, p.phone
+                   p.report_number, p.ref_by, p.diagnosis, p.tx_date, p.delivery_date, p.phone
             FROM   records r
             LEFT JOIN patients p ON r.patient_id = p.id
             ORDER  BY r.saved_at ASC, r.id ASC
@@ -901,7 +936,7 @@ def load_all() -> tuple[list, list]:
 
         draft_rows = conn.execute("""
             SELECT id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
-                   name, age, sex, invoice_date, invoice_number, report_number, dept, diagnosis, tx_date, delivery_date,
+                   name, age, sex, invoice_date, invoice_number, report_number, ref_by, diagnosis, tx_date, delivery_date,
                     drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
             FROM drafts
             ORDER BY saved_at ASC, id ASC

@@ -7,6 +7,7 @@ import os
 import sys
 import faulthandler
 import ctypes
+import threading
 from datetime import datetime
 
 if sys.stderr is not None:
@@ -36,6 +37,53 @@ def _load_loggers():
         def _noop(*_args, **_kwargs):
             return None
         return _noop, _noop, _noop, _noop
+
+
+def _start_report_renderer_warmup():
+    def warmup():
+        try:
+            from report_print import build_report_html
+
+            build_report_html(
+                patient={
+                    "name": "Warmup",
+                    "age": "N/A",
+                    "sex": "N/A",
+                    "ref_by": "N/A",
+                    "invoice_number": "N/A",
+                    "invoice_date": "N/A",
+                    "report_number": "N/A",
+                    "delivery_date": "N/A",
+                    "tx_date": "N/A",
+                    "diag": "N/A",
+                    "med": "N/A",
+                    "drug": "MPA",
+                    "preparation": "N/A",
+                    "dose": "N/A",
+                    "dose_dt": "N/A",
+                    "sample_collection_date": "N/A",
+                },
+                pk={
+                    "auc_0_last": 30.0,
+                    "auc_0_12": 30.0,
+                    "auc_lss": None,
+                    "lss_equation": "",
+                    "lambda_z": None,
+                    "t_half": None,
+                    "r_squared": None,
+                    "t_last": 1.0,
+                    "c_trough": 2.0,
+                    "c_last": 4.0,
+                },
+                interp="Normal",
+                times=[0.0, 0.5, 1.0],
+                concs=[2.0, 8.0, 4.0],
+                print_config={"mode": "custom", "custom_top_gap_cm": 2.3},
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=warmup, name="report-renderer-warmup", daemon=True).start()
 
 
 def _make_splash(app: QApplication) -> QSplashScreen:
@@ -152,6 +200,7 @@ def main():
     window = TDMMainWindow(duration_options=duration_options, db_initialized=True)
     window.show()
     splash.finish(window)
+    QTimer.singleShot(500, _start_report_renderer_warmup)
 
     expiry_popup_shown = False
     precise_expiry_timer = QTimer()

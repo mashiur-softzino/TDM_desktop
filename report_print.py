@@ -57,7 +57,7 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Patient Name:",    patient.get('name', 'N/A'))
     row("Age:",             f"{patient.get('age', 'N/A')} years")
     row("Gender:",          patient.get('sex', 'N/A'))
-    row("Referred By:",     patient.get('dept', 'N/A'))
+    row("Referred By:",     patient.get('ref_by', 'N/A'))
     row("Invoice Number:",  patient.get('invoice_number', 'N/A'))
     row("Invoice Date:",    patient.get('invoice_date', 'N/A'))
     row("Report Number:",   patient.get('report_number', 'N/A'))
@@ -253,7 +253,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
             ("Gender", patient.get('sex', 'N/A')),
         ]),
         triple_row([
-            ("Referred By", patient.get('dept', 'N/A')),
+            ("Referred By", patient.get('ref_by', 'N/A')),
             ("Invoice Number", patient.get('invoice_number', 'N/A')),
             ("Invoice Date", patient.get('invoice_date', 'N/A')),
         ]),

@@ -57,7 +57,7 @@ class TDMWorkflowMixin:
             "invoice_date": self.f_invoice_date.date().toString("dd.MM.yyyy"),
             "invoice_number": self.f_hosp_no.text().strip() or "N/A",
             "report_number": self.f_report_no.text().strip() or "N/A",
-            "dept": self.f_referred_by.text().strip() or "N/A",
+            "ref_by": self.f_referred_by.text().strip() or "N/A",
             "delivery_date": d_del.toString("dd.MM.yyyy") if d_del else "N/A",
             "drug": self.f_drug.text().strip(),
             "preparation": self.f_preparation.text().strip(),
@@ -317,7 +317,7 @@ class TDMWorkflowMixin:
         self.f_age.setText(patient.get("age", "") if patient.get("age") != "N/A" else "")
         self.f_hosp_no.setText(patient.get("invoice_number", "") if patient.get("invoice_number") != "N/A" else "")
         self.f_report_no.setText(patient.get("report_number", "") if patient.get("report_number") != "N/A" else "")
-        self.f_referred_by.setText(patient.get("dept", "") if patient.get("dept") != "N/A" else "")
+        self.f_referred_by.setText(patient.get("ref_by", "") if patient.get("ref_by") != "N/A" else "")
         self.f_phone.setText(patient.get("phone", "") if patient.get("phone") != "N/A" else "")
 
         invoice_date = QDate.fromString(patient.get("invoice_date", ""), "dd.MM.yyyy")
