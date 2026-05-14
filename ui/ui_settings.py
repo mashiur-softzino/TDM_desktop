@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QDialog,
     QSizePolicy,
     QStackedWidget,
     QToolButton,
@@ -17,10 +18,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from database import load_report_print_config, save_report_print_config
-from db_config import load_db_config, save_db_config
-from ui_constants import BLUE, TEXT_CLR, small_label
-from ui_widgets import AlertModal, Card
+from core.database import load_report_print_config, save_report_print_config
+from core.db_config import load_db_config, save_db_config
+from ui.ui_constants import BLUE, TEXT_CLR, small_label
+from ui.ui_widgets import AlertModal, Card, ConfirmActionModal
 
 
 def _field_style():
@@ -196,6 +197,16 @@ def _build_database_config_tab(window):
             AlertModal("Connection Failed", str(exc), tone="error", parent=window).exec()
 
     def save_and_reconnect():
+        confirm = ConfirmActionModal(
+            "Save Database Config",
+            "Do you want to save and apply these database settings?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=window,
+        )
+        if confirm.exec() != QDialog.DialogCode.Accepted:
+            return
+
         config = get_config()
         try:
             conn = psycopg2.connect(
@@ -211,7 +222,10 @@ def _build_database_config_tab(window):
             AlertModal("Save Failed", f"Cannot save - connection failed:\n{exc}", tone="error", parent=window).exec()
             return
         save_db_config(config)
-        AlertModal("Settings Saved", "Database settings saved and reconnected successfully.", tone="success", parent=window).exec()
+        if hasattr(window, "_show_toast"):
+            window._show_toast("Settings saved", "Database settings saved and applied successfully.")
+        else:
+            AlertModal("Settings Saved", "Database settings saved and applied successfully.", tone="success", parent=window).exec()
 
     test_btn.clicked.connect(test_connection)
     save_btn.clicked.connect(save_and_reconnect)
@@ -368,8 +382,12 @@ def _build_report_config_tab(window):
         selected_mode["value"] = mode
         for key, option in buttons.items():
             _refresh_option_button(option, key == mode)
-        custom_gap.setEnabled(mode == "custom")
-        gap_panel.setProperty("active", mode == "custom")
+        custom_active = mode == "custom"
+        custom_gap.setEnabled(custom_active)
+        up_btn.setEnabled(custom_active)
+        down_btn.setEnabled(custom_active)
+        stepper.setEnabled(custom_active)
+        gap_panel.setProperty("active", custom_active)
         gap_panel.style().unpolish(gap_panel)
         gap_panel.style().polish(gap_panel)
 
@@ -390,6 +408,16 @@ def _build_report_config_tab(window):
     """)
 
     def save_report_config():
+        confirm = ConfirmActionModal(
+            "Save Report Config",
+            "Do you want to save these report print settings?",
+            confirm_label="Yes",
+            cancel_label="No",
+            parent=window,
+        )
+        if confirm.exec() != QDialog.DialogCode.Accepted:
+            return
+
         try:
             save_report_print_config({
                 "mode": selected_mode["value"],
@@ -398,7 +426,8 @@ def _build_report_config_tab(window):
         except Exception as exc:
             AlertModal("Save Failed", str(exc), tone="error", parent=window).exec()
             return
-        AlertModal("Settings Saved", "Report print settings saved successfully.", tone="success", parent=window).exec()
+        if hasattr(window, "_show_toast"):
+            window._show_toast("Settings saved", "Report print settings updated successfully.")
 
     save_btn.clicked.connect(save_report_config)
 

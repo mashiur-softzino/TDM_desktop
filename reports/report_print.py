@@ -7,14 +7,13 @@ from io import BytesIO
 from html import escape
 import matplotlib
 matplotlib.use("Agg")
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from datetime import datetime
 from pathlib import Path
+from core.graph_utils import draw_concentration_time_graph
 
 
 def build_report_widget(patient, pk, interp, times, concs):
@@ -176,56 +175,12 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
 
     def graph_data_uri():
         fig, ax = plt.subplots(figsize=(7.6, 2.8), dpi=170)
-        plot_times = np.array(times, dtype=float)
-        plot_concs = np.array(concs, dtype=float)
-        ax.set_facecolor("white")
-        ax.grid(True, linestyle='--', color='#EEEEEE', alpha=0.9, zorder=0)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_color("#E8ECF0")
-        ax.spines["bottom"].set_color("#E8ECF0")
-
-        t_fine = plot_times
-        c_fine = plot_concs
-
-        norm = plt.Normalize(t_fine[0], t_fine[-1] if t_fine[-1] != t_fine[0] else t_fine[0] + 1)
-        points = np.array([t_fine, c_fine]).T.reshape(-1, 1, 2)
-        segs = np.concatenate([points[:-1], points[1:]], axis=1)
-        lc = LineCollection(segs, cmap='rainbow', norm=norm, linewidth=2.6, zorder=3)
-        lc.set_array(t_fine)
-        ax.add_collection(lc)
-
-        n_fill = 80
-        t_segs = np.linspace(t_fine[0], t_fine[-1], n_fill + 1)
-        for i in range(n_fill):
-            ts = t_segs[i:i + 2]
-            cs_seg = np.interp(ts, plot_times, plot_concs)
-            ax.fill_between(ts, 0, cs_seg, color=plt.cm.rainbow(norm(t_segs[i])), alpha=0.18, zorder=1)
-
-        dot_colors = plt.cm.rainbow(np.linspace(0, 1, len(plot_times)))
-        ax.scatter(plot_times, plot_concs, color=dot_colors, s=42, zorder=5,
-                   edgecolors='white', linewidth=1.4)
-
-        ax.annotate(
-            'Trough', (plot_times[0], plot_concs[0]),
-            xytext=(8, 12), textcoords='offset points',
-            color='#E53935', fontsize=9, fontweight='bold',
-            arrowprops=dict(arrowstyle='-', color='#E53935', lw=1)
-        )
-
-        ax.set_xlim(left=0, right=plot_times[-1])
-        ax.set_xticks(plot_times)
-        ax.set_xticklabels([f"{int(t * 60)}" for t in plot_times])
-        ax.set_ylim(bottom=0)
-        ax.set_xlabel("Time (min)", fontsize=10, fontweight="bold")
-        ax.set_ylabel("Conc.(μg/ml)", fontsize=10, fontweight="bold")
-        ax.set_title("Concentration-Time Graph", fontsize=12, fontweight='bold', pad=12)
+        draw_concentration_time_graph(ax, times, concs, patient.get("drug", "MPA"))
         fig.subplots_adjust(left=0.08, right=0.99, top=0.82, bottom=0.24)
         buf = BytesIO()
         fig.savefig(buf, format="png", facecolor="white", bbox_inches="tight")
         plt.close(fig)
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
     interp_color = '#E53935' if interp in ('Low', 'High') else '#2E7D32'
     has_data = bool(times and concs)
     if has_data:

@@ -18,15 +18,12 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QIcon
 
-
-def _asset_path(filename: str) -> str:
-    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, filename)
+from core.app_paths import asset_path
 
 
 def _load_loggers():
     try:
-        from app_logger import (
+        from core.app_logger import (
             log_startup,
             log_shutdown,
             log_license_activated,
@@ -42,7 +39,7 @@ def _load_loggers():
 def _start_report_renderer_warmup():
     def warmup():
         try:
-            from report_print import build_report_html
+            from reports.report_print import build_report_html
 
             build_report_html(
                 patient={
@@ -105,10 +102,7 @@ def _make_splash(app: QApplication) -> QSplashScreen:
     painter.setBrush(QColor(255, 255, 255, 18))
     painter.drawRoundedRect(24, 22, w - 48, h - 44, 26, 26)
 
-    logo_path = _asset_path("softzino.png")
-    logo = QPixmap(logo_path)
-    if logo.isNull():
-        logo = QPixmap(_asset_path("SOFTZINO_LOGO.png"))
+    logo = QPixmap(str(asset_path("softzino.png")))
     if not logo.isNull():
         logo = logo.scaledToHeight(60, Qt.TransformationMode.SmoothTransformation)
         logo_x = (w - logo.width()) // 2
@@ -146,11 +140,11 @@ def main():
             pass
 
     app = QApplication(sys.argv)
-    app_icon = QIcon(_asset_path("tdm_logo_icon.png"))
+    app_icon = QIcon(str(asset_path("tdm_logo_icon.png")))
     if app_icon.isNull():
-        app_icon = QIcon(_asset_path("tdm_logo.png"))
+        app_icon = QIcon(str(asset_path("tdm_logo.png")))
     if app_icon.isNull():
-        app_icon = QIcon(_asset_path("tdm_logo.ico"))
+        app_icon = QIcon(str(asset_path("tdm_logo.ico")))
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
     splash = _make_splash(app)
@@ -159,11 +153,22 @@ def main():
 
     log_startup, log_shutdown, log_license_activated, log_license_expired = _load_loggers()
 
-    from license_manager import LicenseManager
+    from core.license_manager import LicenseManager
 
     lm = LicenseManager()
     if not lm.is_licensed():
-        from activation_window import ActivationWindow
+        if lm.needs_clock_verification():
+            splash.hide()
+            message = QMessageBox()
+            message.setIcon(QMessageBox.Icon.Warning)
+            message.setWindowTitle("License Verification Required")
+            message.setText("System clock change detected.")
+            message.setInformativeText(lm.last_error())
+            message.setStandardButtons(QMessageBox.StandardButton.Ok)
+            message.exec()
+            sys.exit(0)
+
+        from ui.activation_window import ActivationWindow
 
         splash.hide()
         win = ActivationWindow(lm)
@@ -177,8 +182,8 @@ def main():
     info = lm.license_info()
     log_license_activated(info.get("license_key", ""), info.get("expires_at_local", ""))
 
-    from database import create_database_backup, init_db
-    from ui_constants import DEFAULT_DURATION_OPTIONS
+    from core.database import create_database_backup, init_db
+    from ui.ui_constants import DEFAULT_DURATION_OPTIONS
 
     while True:
         try:
@@ -186,14 +191,14 @@ def main():
             break
         except Exception:
             splash.hide()
-            from db_connection_dialog import DBConnectionDialog
+            from ui.db_connection_dialog import DBConnectionDialog
             dlg = DBConnectionDialog()
             if dlg.exec() != DBConnectionDialog.DialogCode.Accepted:
                 sys.exit(0)
             splash.show()
             app.processEvents()
 
-    from tdm_report import TDMMainWindow, STYLE
+    from app.tdm_report import TDMMainWindow, STYLE
 
     app.setStyleSheet(STYLE)
 
@@ -219,11 +224,17 @@ def main():
 
         message = QMessageBox(window)
         message.setIcon(QMessageBox.Icon.Warning)
-        message.setWindowTitle("License Expired")
-        message.setText("Your license has expired.")
-        message.setInformativeText(
-            "Please extend your license or purchase a new license to continue using this software."
-        )
+        license_error = lm.last_error()
+        if license_error:
+            message.setWindowTitle("License Verification Required")
+            message.setText("License verification is required.")
+            message.setInformativeText(license_error)
+        else:
+            message.setWindowTitle("License Expired")
+            message.setText("Your license has expired.")
+            message.setInformativeText(
+                "Please extend your license or purchase a new license to continue using this software."
+            )
         message.setStandardButtons(QMessageBox.StandardButton.Ok)
         message.exec()
 

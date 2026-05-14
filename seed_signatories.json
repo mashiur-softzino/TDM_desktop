@@ -4,69 +4,69 @@
     "designation": "MBBS,BCS,M.Phil (Clinical Pathology)\nBMDC No: A-53922\nAssistant Professor\nDept. of Biochemistry NILMRC",
     "type": "doctor",
     "phone": "01900000001",
-    "signature_file": "Signature/fatema.PNG"
+    "signature_file": "signatures/fatema.PNG"
   },
   {
     "name": "Dr. Sharif-Al-Nur",
     "designation": "MBBS, BCS, MD (Biochemistry)\nBMDC No: A-45779\nMedical Officer\nDepartment of Biochemistry, NILMRC",
     "type": "doctor",
     "phone": "01900000002",
-    "signature_file": "Signature/sharif.PNG"
+    "signature_file": "signatures/sharif.PNG"
   },
   {
     "name": "Dr. Sohani Ferdousi",
     "designation": "Professor & Head\nBMDC No: A-28143\nDepartment of Biochemistry\nNILMRC, Dhaka 1207",
     "type": "doctor",
     "phone": "01900000003",
-    "signature_file": "Signature/sohani.PNG"
+    "signature_file": "signatures/sohani.PNG"
   },
   {
     "name": "Md Rafiqul Islam",
     "designation": "B.Sc(Hon's), M.Sc (DU)\nLab Incharge (Biochemistry & Immunology)",
     "type": "technologist",
     "phone": "01900000004",
-    "signature_file": "Signature/rafiqul.PNG"
+    "signature_file": "signatures/rafiqul.PNG"
   },
   {
     "name": "Md. Jamil Hossain",
     "designation": "DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar, Dhaka",
     "type": "technologist",
     "phone": "01900000005",
-    "signature_file": "Signature/jamil.PNG"
+    "signature_file": "signatures/jamil.PNG"
   },
   {
     "name": "Tofayel Ahmed",
     "designation": "B.Sc (DU), DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar, Dhaka",
     "type": "technologist",
     "phone": "01900000006",
-    "signature_file": "Signature/tofael.PNG"
+    "signature_file": "signatures/tofael.PNG"
   },
   {
     "name": "Mst. Sonia Khatun",
     "designation": "DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar, Dhaka",
     "type": "technologist",
     "phone": "01900000007",
-    "signature_file": "Signature/Mst. Sonia Khatun.PNG"
+    "signature_file": "signatures/Mst. Sonia Khatun.PNG"
   },
   {
     "name": "Md. Rahim Mondol",
     "designation": "B.Sc in Lab (DU),DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar,Dhaka -1207",
     "type": "technologist",
     "phone": "01900000008",
-    "signature_file": "Signature/Rahim Mondol.PNG"
+    "signature_file": "signatures/Rahim Mondol.PNG"
   },
   {
     "name": "Sobuj Roy",
     "designation": "DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar, Dhaka",
     "type": "technologist",
     "phone": "01900000009",
-    "signature_file": "Signature/Sobuj Roy.PNG"
+    "signature_file": "signatures/Sobuj Roy.PNG"
   },
   {
     "name": "Tanzila Akter",
     "designation": "M.Sc (JU), B.Sc (DU), DMLT (Lab)\nNILMRC, Sher-E-Bangla Nagar, Dhaka",
     "type": "technologist",
     "phone": "01900000010",
-    "signature_file": "Signature/Tanjila Akter.PNG"
+    "signature_file": "signatures/Tanjila Akter.PNG"
   }
 ]

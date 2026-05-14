@@ -2,7 +2,7 @@
 Reusable UI widget classes for the TDM Report application.
 """
 
-from ui_constants import (
+from ui.ui_constants import (
     BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
     BORDER, RED, GREEN, ORANGE, make_shadow, small_label, value_label,
 )
@@ -1215,6 +1215,7 @@ class ToastMessage(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(16, 14, 16, 14)
         row.setSpacing(12)
+        self._toast_layout = row
 
         self.icon = QLabel()
         self.icon.setFixedSize(34, 34)
@@ -1228,9 +1229,11 @@ class ToastMessage(QFrame):
         text_col.setSpacing(2)
         self.title = QLabel()
         self.title.setStyleSheet("color: #123524; font-size: 14px; font-weight: 700;")
+        self.title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.body = QLabel()
         self.body.setStyleSheet("color: #335847; font-size: 11px;")
         self.body.setWordWrap(True)
+        self.body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         text_col.addWidget(self.title)
         text_col.addWidget(self.body)
         row.addLayout(text_col, 1)
@@ -1246,6 +1249,24 @@ class ToastMessage(QFrame):
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_text_width()
+
+    def _sync_text_width(self):
+        margins = self._toast_layout.contentsMargins()
+        available = (
+            self.width()
+            - margins.left()
+            - margins.right()
+            - self.icon.width()
+            - self.close_btn.width()
+            - (self._toast_layout.spacing() * 2)
+        )
+        available = max(120, available)
+        self.title.setFixedWidth(available)
+        self.body.setFixedWidth(available)
 
     def show_message(self, title, body, duration_ms=2600, tone="success"):
         if tone == "warning":
@@ -1280,7 +1301,9 @@ class ToastMessage(QFrame):
             self.close_btn.setIcon(qta.icon("mdi6.close", color="#4A6A58"))
         self.title.setText(title)
         self.body.setText(body)
-        self.adjustSize()
+        self._sync_text_width()
+        self.layout().activate()
+        self.setFixedHeight(self.sizeHint().height())
         self.show()
         self.raise_()
         self._timer.start(duration_ms)

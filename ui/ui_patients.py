@@ -3,12 +3,12 @@ Patient-related UI classes: results dialog, patient report dialog,
 patient row widget, patients list card.
 """
 
-from ui_constants import (
+from ui.ui_constants import (
     BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
     BORDER, RED, GREEN, ORANGE,
 )
-from ui_widgets import Card, StatBox, IconCircle, ToastMessage, make_shadow
-from ui_sampling import GradientCanvas
+from ui.ui_widgets import Card, StatBox, IconCircle, ToastMessage, make_shadow
+from ui.ui_sampling import GradientCanvas
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
@@ -18,15 +18,19 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 import qtawesome as qta
-from calculations import interpret_result
+from core.calculations import interpret_result
 
 
 class ResultsDialog(QDialog):
     def __init__(self, parent=None, print_handler=None):
         super().__init__(parent)
         self.setWindowTitle("Generated Result")
-        self.resize(980, 700)
-        self.setMinimumSize(920, 640)
+        self._normal_size = (980, 700)
+        self._normal_min_size = (920, 640)
+        self._compact_size = (820, 460)
+        self._compact_min_size = (760, 420)
+        self.resize(*self._normal_size)
+        self.setMinimumSize(*self._normal_min_size)
         self.setModal(False)
         self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
         self._print_handler = print_handler
@@ -45,11 +49,14 @@ class ResultsDialog(QDialog):
         content_lay = QVBoxLayout(content)
         content_lay.setContentsMargins(0, 0, 0, 0)
         content_lay.setSpacing(18)
+        content_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         from PyQt6.QtWidgets import QGridLayout
         self.results_card = Card("Pharmacokinetic Results", "mdi6.chart-box-outline", icon_color=BLUE)
+        self.results_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self._results_grid = QGridLayout()
         self._results_grid.setSpacing(14)
+        self._results_grid.setContentsMargins(0, 0, 0, 0)
 
         self.stat_trough = StatBox(
             "Trough Concentration", unit="μg/mL",
@@ -75,10 +82,6 @@ class ResultsDialog(QDialog):
             "Interpretation", unit="Therapeutic: 30–60 mg·h/L",
             icon_name="mdi6.stethoscope", icon_color="#059669", icon_bg="#D1FAE5",
         )
-        self.stat_thalf = StatBox(
-            "Terminal  t½", unit="hours",
-            icon_name="mdi6.timer-sand", icon_color="#DB2777", icon_bg="#FCE7F3",
-        )
         self.stat_lss = StatBox(
             "LSS AUC₀₋₁₂ (Estimated)", unit="mg·h/L",
             icon_name="mdi6.function-variant", icon_color="#7C3AED", icon_bg="#EDE9FE",
@@ -86,10 +89,13 @@ class ResultsDialog(QDialog):
         boxes = [
             self.stat_trough, self.stat_c05,   self.stat_clast,
             self.stat_auc,    self.stat_auc12, self.stat_interp,
-            self.stat_thalf,  self.stat_lss,
+            self.stat_lss,
         ]
         self._result_boxes = boxes
-        self._layout_result_boxes(False)
+        for box in self._result_boxes:
+            box.setParent(self.results_card)
+            box.hide()
+        self._layout_result_boxes("auc")
         self.results_card.body().addLayout(self._results_grid)
 
         # Show All Points toggle
@@ -141,10 +147,10 @@ class ResultsDialog(QDialog):
         content_lay.addWidget(self.results_card)
 
         self.graph_card = Card("Concentration-Time Graph", "mdi6.chart-line", icon_color=BLUE)
-        self.canvas = GradientCanvas()
-        self.graph_card.body().addWidget(self.canvas)
+        self.canvas = None
         content_lay.addWidget(self.graph_card)
         self.graph_card.hide()  # Hidden by default, shown when data is available
+        content_lay.addStretch(1)
 
         scroll.setWidget(content)
         lay.addWidget(scroll, 1)
@@ -197,6 +203,8 @@ class ResultsDialog(QDialog):
         try:
             if hasattr(self, "canvas") and self.canvas is not None:
                 self.canvas.cleanup()
+                self.canvas.deleteLater()
+                self.canvas = None
         except Exception:
             pass
 
@@ -211,24 +219,49 @@ class ResultsDialog(QDialog):
             "Hide Points  ▴" if self._show_all_expanded else "Show All Points  ▾"
         )
 
-    def _layout_result_boxes(self, direct_auc=False):
+    def _layout_result_boxes(self, mode="auc"):
         for box in getattr(self, "_result_boxes", []):
             self._results_grid.removeWidget(box)
-        positions = [
-            (self.stat_trough, 0, 0),
-            (self.stat_c05, 0, 1),
-            (self.stat_clast, 0, 2),
-            (self.stat_auc, 1, 0),
-            (self.stat_auc12, 1, 1),
-            (self.stat_interp, 1, 2),
-            (self.stat_thalf, 2, 0),
-            (self.stat_lss, 2, 1),
-        ]
-        if direct_auc:
-            positions = [(box, row, col) for box, row, col in positions if box is not self.stat_lss]
-            positions.insert(1, (self.stat_lss, 0, 1))
+            box.setVisible(False)
+
+        for col in range(3):
+            self._results_grid.setColumnMinimumWidth(col, 0)
+            self._results_grid.setColumnStretch(col, 0)
+        for row in range(3):
+            self._results_grid.setRowMinimumHeight(row, 0)
+            self._results_grid.setRowStretch(row, 0)
+
+        if mode == "lss":
+            column_stretches = (1, 1, 1)
+            positions = [
+                (self.stat_trough, 0, 0),
+                (self.stat_c05, 0, 1),
+                (self.stat_clast, 0, 2),
+                (self.stat_lss, 1, 0),
+                (self.stat_interp, 1, 1),
+            ]
+        elif mode == "direct":
+            column_stretches = (1, 1, 0)
+            positions = [
+                (self.stat_auc12, 0, 0),
+                (self.stat_interp, 0, 1),
+            ]
+        else:
+            column_stretches = (1, 1, 1)
+            positions = [
+                (self.stat_trough, 0, 0),
+                (self.stat_c05, 0, 1),
+                (self.stat_clast, 0, 2),
+                (self.stat_auc, 1, 0),
+                (self.stat_auc12, 1, 1),
+                (self.stat_interp, 1, 2),
+            ]
+        for col, stretch in enumerate(column_stretches):
+            self._results_grid.setColumnStretch(col, stretch)
         for box, row, col in positions:
             self._results_grid.addWidget(box, row, col)
+            box.setVisible(True)
+        self._results_grid.invalidate()
 
     def apply_results(self, pk, interp, times=None, concs=None):
         def fmt_hour(v):
@@ -237,17 +270,25 @@ class ResultsDialog(QDialog):
         def fmt(v, d=3):
             return f"{v:.{d}f}" if v is not None else "N/A"
 
+        direct_auc = not (times or concs)
+        is_lss = (
+            not direct_auc
+            and pk.get('auc_lss') is not None
+            and not str(pk.get('lss_equation', '')).lower().startswith('direct input')
+        )
+        result_mode = "direct" if direct_auc else ("lss" if is_lss else "auc")
+
         last_hr = fmt_hour(pk['t_last'])
         self.stat_trough.set_label("Trough Concentration")
         self.stat_trough.set_unit("μg/mL")
         self.stat_trough.set_value(fmt(pk['c_trough'], 2))
 
-        # 0.5 hr concentration
-        c_05 = next((c for t, c in zip(times or [], concs or []) if abs(t - 0.5) < 0.05), None)
-        if c_05 is not None:
-            self.stat_c05.set_label("0.5 hr Concentration")
+        first_post = next(((t, c) for t, c in zip(times or [], concs or []) if t > 0), None)
+        if first_post is not None:
+            first_time, first_conc = first_post
+            self.stat_c05.set_label(f"{fmt_hour(first_time)} hr Concentration")
             self.stat_c05.set_unit("μg/mL")
-            self.stat_c05.set_value(fmt(c_05, 2))
+            self.stat_c05.set_value(fmt(first_conc, 2))
             self.stat_c05.setVisible(True)
         else:
             self.stat_c05.setVisible(False)
@@ -300,45 +341,51 @@ class ResultsDialog(QDialog):
             self._all_points_frame.hide()
             self._show_all_expanded = False
 
-        self.stat_clast.set_label(f"{last_hr} hr Concentration")
+        self.stat_clast.set_label("2 hr Concentration" if is_lss else f"{last_hr} hr Concentration")
         self.stat_clast.set_unit("μg/mL")
         self.stat_clast.set_value(fmt(pk['c_last'], 2))
         self.stat_auc.set_label(f"AUC (0 → {last_hr} hr)")
         self.stat_auc.set_unit("Observed exposure  •  mg·h/L")
         self.stat_auc.set_value(fmt(pk['auc_0_last'], 3))
-        self.stat_auc12.set_label(f"{last_hr} hour extrapolated to 12 hr MPA AUC")
+        if direct_auc:
+            self.stat_auc12.set_label("MPA AUC 0-12")
+        else:
+            self.stat_auc12.set_label(f"{last_hr} hour extrapolated to 12 hr MPA AUC")
         self.stat_auc12.set_unit("mg·h/L")
         self.stat_auc12.set_value(fmt(pk['auc_0_12'], 3))
 
         self.stat_auc12.set_warning(None)
 
-        self.stat_thalf.set_label("Terminal  t½")
-        self.stat_thalf.set_unit("hours")
-        self.stat_thalf.set_value(fmt(pk['t_half'], 2) if pk['t_half'] else 'N/A')
         _, rng = interpret_result('MPA', pk['auc_0_12'])
         interp_color = {'Low': RED, 'High': RED, 'Therapeutic': GREEN}.get(interp, TEXT_CLR)
         self.stat_interp.set_label("Interpretation")
         self.stat_interp.set_unit(f"Therapeutic range: {rng[0]}–{rng[1]} mg·h/L")
         self.stat_interp.set_value(interp, color=interp_color)
 
-        direct_auc = not (times or concs)
-        if pk.get('auc_lss') is not None:
+        if is_lss:
             lss_val = pk['auc_lss']
             self.stat_lss.set_value(fmt(lss_val, 3))
             self.stat_lss.set_unit(pk.get('lss_equation', 'LSS estimate') + "  •  mg·h/L")
-            self.stat_lss.setVisible(True)
 
             self.stat_lss.set_warning(None)
-        else:
-            self.stat_lss.setVisible(False)
-        self._layout_result_boxes(direct_auc)
+        self._layout_result_boxes(result_mode)
 
     def plot_data(self, times, concs, drug='MPA'):
+        if self.canvas is None:
+            self.canvas = GradientCanvas(self.graph_card)
+            self.graph_card.body().addWidget(self.canvas)
         self.canvas.plot(times, concs, drug=drug)
 
     def set_graph_visible(self, visible: bool):
         """Show or hide the graph card (hidden for Direct AUC / single-value mode)."""
         self.graph_card.setVisible(visible)
+        if visible:
+            self.setMinimumSize(*self._normal_min_size)
+            if self.width() < self._normal_size[0] or self.height() < self._normal_size[1]:
+                self.resize(*self._normal_size)
+        else:
+            self.setMinimumSize(*self._compact_min_size)
+            self.resize(*self._compact_size)
 
 
 class PatientReportDialog(QDialog):
@@ -364,7 +411,7 @@ class PatientReportDialog(QDialog):
         sub.setStyleSheet(f"font-size: 12px; color: {LABEL_CLR};")
         lay.addWidget(sub)
 
-        from report_print import build_report_widget
+        from reports.report_print import build_report_widget
         report = build_report_widget(
             patient=snapshot.get('patient', {}),
             pk=snapshot.get('pk', {}),
@@ -546,7 +593,7 @@ class PatientsListCard(Card):
 
         # ── Search bar (in header, right side) ──────────
         self._search_edit = QLineEdit()
-        placeholder = "Search by name" if self._row_type == 'draft' else "Search by name or patient ID"
+        placeholder = "Search by name or phone number" if self._row_type == 'draft' else "Search by name or patient ID"
         self._search_edit.setPlaceholderText(placeholder)
         self._search_edit.setStyleSheet(f"""
             QLineEdit {{

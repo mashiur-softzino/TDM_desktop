@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('softzino.png', '.'), ('cal_icon.png', '.')],
+    datas=[('assets', 'assets'), ('seed_signatories.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['cal_icon.png'],
+    icon=['assets/tdm_logo.ico'],
 )

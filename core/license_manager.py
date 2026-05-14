@@ -14,10 +14,11 @@ import threading
 import time
 import uuid
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import requests
-from app_paths import license_file, migrate_legacy_file
+from core.app_paths import license_file, migrate_legacy_file
 
 try:
     from nacl.exceptions import BadSignatureError
@@ -30,6 +31,12 @@ BASE_URL = "https://dev-license.softzino.com/api/v1/license"
 LICENSE_FILE = license_file()
 migrate_legacy_file("license.json", LICENSE_FILE)
 HEARTBEAT_INTERVAL = 300  # 5 minutes
+CLOCK_ROLLBACK_TOLERANCE_SECONDS = 300  # allow small NTP/timezone corrections
+CHECKPOINT_WRITE_INTERVAL_SECONDS = 60
+CLOCK_VERIFICATION_ERROR = (
+    "System clock change detected. Please correct your computer date/time and "
+    "connect to the internet to verify your license."
+)
 
 PASETO_HEADER = b"v4.public."
 TRUSTED_SIGNING_KID = "signing-3c752a2ed5695e1638c7d10388ce0141"
@@ -78,6 +85,43 @@ def is_license_expired_local(expires_at: str | None) -> bool:
     if exp is None:
         return False
     return datetime.now().astimezone() > exp
+
+
+def extract_server_time(
+    data: dict | None, response: requests.Response | None
+) -> datetime | None:
+    if isinstance(data, dict):
+        candidates = [
+            data.get("server_time"),
+            data.get("serverTime"),
+            data.get("timestamp"),
+            data.get("time"),
+        ]
+        inner = data.get("data")
+        if isinstance(inner, dict):
+            candidates.extend(
+                [
+                    inner.get("server_time"),
+                    inner.get("serverTime"),
+                    inner.get("timestamp"),
+                    inner.get("time"),
+                ]
+            )
+        for candidate in candidates:
+            parsed = (
+                parse_iso_datetime(candidate) if isinstance(candidate, str) else None
+            )
+            if parsed is not None:
+                return parsed.astimezone()
+
+    if response is not None:
+        try:
+            date_header = response.headers.get("Date")
+            if date_header:
+                return parsedate_to_datetime(date_header).astimezone()
+        except Exception:
+            return None
+    return None
 
 
 def b64url_decode(value: str) -> bytes:
@@ -131,11 +175,20 @@ class LicenseManager:
         self._running = False
         self._stop_event = threading.Event()
         self._last_error = ""
+        self._session_wall_started_at = datetime.now().astimezone()
+        self._session_monotonic_started_at = time.monotonic()
         self._load()
 
     def is_licensed(self) -> bool:
         with self._lock:
-            return self._offline_valid()
+            if self._offline_valid():
+                return True
+            needs_online_verification = self._needs_clock_verification_locked()
+
+        if needs_online_verification and self._try_online_recovery():
+            with self._lock:
+                return self._offline_valid()
+        return False
 
     def verify_key(self, license_key: str) -> tuple[bool, str]:
         """
@@ -201,7 +254,19 @@ class LicenseManager:
                 if is_license_expired_local(claims.get("license_expires_at")):
                     return False, "License has expired"
 
-                self._save(license_key, fingerprint, token, claims)
+                trusted_now = extract_server_time(data, resp)
+                if trusted_now and not self._local_clock_matches_trusted_time(
+                    trusted_now
+                ):
+                    return False, CLOCK_VERIFICATION_ERROR
+
+                self._save(
+                    license_key,
+                    fingerprint,
+                    token,
+                    claims,
+                    trusted_now=trusted_now,
+                )
                 self._start_heartbeat()
                 return True, ""
             msg = error_message_from_response(
@@ -247,6 +312,8 @@ class LicenseManager:
             claims = self._verified_token_claims()
             if claims is None:
                 return True
+            if not self._validate_clock_checkpoint(update=True):
+                return True
             if is_license_expired_local(claims.get("license_expires_at")):
                 self._mark_expired()
                 return True
@@ -263,23 +330,46 @@ class LicenseManager:
         with self._lock:
             return self._last_error
 
+    def needs_clock_verification(self) -> bool:
+        with self._lock:
+            return self._needs_clock_verification_locked()
+
     def _offline_valid(self) -> bool:
         claims = self._verified_token_claims()
         if claims is None:
             return False
         if claims.get("status") != "active":
             return False
+        if not self._validate_clock_checkpoint(update=True):
+            return False
         if is_license_expired_local(claims.get("license_expires_at")):
             self._mark_expired()
             return False
         return True
 
-    def _save(self, license_key: str, fingerprint: str, token: str, claims: dict):
+    def _save(
+        self,
+        license_key: str,
+        fingerprint: str,
+        token: str,
+        claims: dict,
+        trusted_now: datetime | None = None,
+    ):
         with self._lock:
+            now = datetime.now().astimezone()
+            trusted_now_iso = (
+                trusted_now.isoformat()
+                if trusted_now
+                else self._data.get("last_trusted_at")
+            )
             self._data = {
                 "license_key": license_key,
                 "fingerprint": fingerprint,
                 "status": "active",
+                "clock_rollback_detected": False,
+                "last_seen_at": now.isoformat(),
+                "last_seen_checkpoint_at": now.isoformat(),
+                "last_trusted_at": trusted_now_iso,
                 "activated_at": claims.get("iat"),
                 "activated_at_local": to_local_iso(claims.get("iat")),
                 "expires_at": claims.get("license_expires_at"),
@@ -289,6 +379,7 @@ class LicenseManager:
                 ),
                 "token": token,
             }
+            self._reset_session_clock_baseline(now)
             self._persist()
 
     def _load(self):
@@ -347,21 +438,35 @@ class LicenseManager:
                 fp = self._data.get("fingerprint")
             if lk and fp:
                 try:
-                    requests.post(
+                    resp = requests.post(
                         f"{BASE_URL}/heartbeat",
                         json={"license_key": lk, "fingerprint": fp},
                         timeout=10,
                     )
+                    if 200 <= resp.status_code < 300:
+                        try:
+                            data = resp.json()
+                        except Exception:
+                            data = {}
+                        self._record_online_checkpoint(
+                            trusted_now=extract_server_time(data, resp)
+                        )
                 except Exception:
                     pass
             self._try_refresh_token()
 
     def _try_refresh_token(self):
+        self._refresh_saved_token(require_trusted_clock=False)
+
+    def _try_online_recovery(self) -> bool:
+        return self._refresh_saved_token(require_trusted_clock=True)
+
+    def _refresh_saved_token(self, require_trusted_clock: bool = False) -> bool:
         with self._lock:
             lk = self._data.get("license_key")
             fp = self._data.get("fingerprint")
         if not lk or not fp:
-            return
+            return False
         try:
             resp = requests.post(
                 f"{BASE_URL}/token/refresh",
@@ -372,13 +477,34 @@ class LicenseManager:
             if resp.status_code == 200 and data.get("success"):
                 token = data.get("data", {}).get("token")
                 if not token:
-                    return
+                    return False
                 claims = self._verify_token(token, lk)
                 if claims is None:
-                    return
-                self._save(lk, fp, token, claims)
+                    return False
+                trusted_now = extract_server_time(data, resp)
+                if require_trusted_clock and trusted_now is None:
+                    with self._lock:
+                        self._set_clock_verification_error_locked(persist=False)
+                    return False
+                if trusted_now and not self._local_clock_matches_trusted_time(
+                    trusted_now
+                ):
+                    with self._lock:
+                        self._set_clock_verification_error_locked(persist=True)
+                    return False
+                self._save(
+                    lk,
+                    fp,
+                    token,
+                    claims,
+                    trusted_now=trusted_now,
+                )
+                return True
         except Exception:
-            pass
+            if require_trusted_clock:
+                with self._lock:
+                    self._set_clock_verification_error_locked(persist=False)
+        return False
 
     def _persist(self):
         try:
@@ -442,6 +568,91 @@ class LicenseManager:
 
         if updated:
             self._persist()
+
+    def _record_online_checkpoint(self, trusted_now: datetime | None = None):
+        now = datetime.now().astimezone()
+        with self._lock:
+            now_iso = now.isoformat()
+            self._data["clock_rollback_detected"] = False
+            self._data["last_seen_at"] = now_iso
+            self._data["last_seen_checkpoint_at"] = now_iso
+            if trusted_now is not None:
+                self._data["last_trusted_at"] = trusted_now.isoformat()
+            self._last_error = ""
+            self._reset_session_clock_baseline(now)
+            self._persist()
+
+    def _reset_session_clock_baseline(self, wall_time: datetime | None = None):
+        self._session_wall_started_at = wall_time or datetime.now().astimezone()
+        self._session_monotonic_started_at = time.monotonic()
+
+    def _local_clock_matches_trusted_time(self, trusted_now: datetime) -> bool:
+        now = datetime.now().astimezone()
+        trusted_now = trusted_now.astimezone()
+        delta = abs(now.timestamp() - trusted_now.timestamp())
+        return delta <= CLOCK_ROLLBACK_TOLERANCE_SECONDS
+
+    def _needs_clock_verification_locked(self) -> bool:
+        return (
+            self._data.get("clock_rollback_detected") is True
+            or self._last_error == CLOCK_VERIFICATION_ERROR
+        )
+
+    def _set_clock_verification_error_locked(self, persist: bool = False):
+        self._data["clock_rollback_detected"] = True
+        self._last_error = CLOCK_VERIFICATION_ERROR
+        if persist:
+            self._persist()
+
+    def _validate_clock_checkpoint(self, update: bool = False) -> bool:
+        if self._data.get("clock_rollback_detected"):
+            self._last_error = CLOCK_VERIFICATION_ERROR
+            return False
+
+        now = datetime.now().astimezone()
+        session_elapsed = time.monotonic() - self._session_monotonic_started_at
+        expected_now = datetime.fromtimestamp(
+            self._session_wall_started_at.timestamp() + session_elapsed,
+            tz=self._session_wall_started_at.tzinfo,
+        )
+        if (
+            now.timestamp() + CLOCK_ROLLBACK_TOLERANCE_SECONDS
+            < expected_now.timestamp()
+        ):
+            self._set_clock_verification_error_locked(persist=True)
+            return False
+
+        last_seen = parse_iso_datetime(self._data.get("last_seen_at"))
+        if last_seen is not None:
+            last_seen = last_seen.astimezone()
+
+        if last_seen and (
+            now.timestamp() + CLOCK_ROLLBACK_TOLERANCE_SECONDS < last_seen.timestamp()
+        ):
+            self._set_clock_verification_error_locked(persist=True)
+            return False
+
+        if not update:
+            self._last_error = ""
+            return True
+
+        checkpoint = parse_iso_datetime(self._data.get("last_seen_checkpoint_at"))
+        if checkpoint is not None:
+            checkpoint = checkpoint.astimezone()
+
+        should_write = last_seen is None or checkpoint is None
+        if not should_write and now >= last_seen:
+            elapsed = now.timestamp() - checkpoint.timestamp()
+            should_write = elapsed >= CHECKPOINT_WRITE_INTERVAL_SECONDS
+
+        if should_write:
+            now_iso = now.isoformat()
+            self._data["last_seen_at"] = now_iso
+            self._data["last_seen_checkpoint_at"] = now_iso
+            self._persist()
+
+        self._last_error = ""
+        return True
 
     def _remaining_days(self, expires_at: str | None) -> int:
         exp = parse_local_license_datetime(expires_at)

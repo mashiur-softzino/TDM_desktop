@@ -6,14 +6,7 @@ AUC method: Linear-Up / Log-Down (mixed trapezoidal) — FDA/EMA standard
 LSS regression equations: Le Meur et al., Transplantation 2003
 """
 
-def _numpy():
-    import numpy as np
-    return np
-
-
-def _linregress():
-    from scipy.stats import linregress
-    return linregress
+import math
 
 
 def canonical_drug_name(drug: str) -> str:
@@ -113,11 +106,9 @@ def mixed_trapezoidal_auc(times, concentrations):
     - Rising segments (Cᵢ₊₁ ≥ Cᵢ): linear trapezoid
     - Falling segments (Cᵢ₊₁ < Cᵢ): log-linear trapezoid
     """
-    np = _numpy()
-    times = np.array(times, dtype=float)
-    concs = np.array(concentrations, dtype=float)
+    times = [float(t) for t in times]
+    concs = [float(c) for c in concentrations]
     auc = 0.0
-    segments = []
     for i in range(1, len(times)):
         dt = times[i] - times[i - 1]
         c0, c1 = concs[i - 1], concs[i]
@@ -128,7 +119,7 @@ def mixed_trapezoidal_auc(times, concentrations):
         else:
             # Falling → log-linear trapezoid
             if c1 > 0 and c0 > 0:
-                area = dt * (c0 - c1) / np.log(c0 / c1)
+                area = dt * (c0 - c1) / math.log(c0 / c1)
             else:
                 # Fallback to linear if concentration hits zero
                 area = dt * (c0 + c1) / 2.0
@@ -142,29 +133,35 @@ def estimate_lambda_z(times, concentrations, n_points=3):
     log-linear regression on the last n_points data points.
     Returns (lambda_z, r_squared) or (None, None) if cannot estimate.
     """
-    np = _numpy()
-    linregress = _linregress()
-    times = np.array(times, dtype=float)
-    concs = np.array(concentrations, dtype=float)
+    pairs = [
+        (float(t), float(c))
+        for t, c in zip(times, concentrations)
+        if float(c) > 0
+    ]
 
-    idx = concs > 0
-    valid_times = times[idx]
-    valid_concs = concs[idx]
-
-    use_n = min(n_points, len(valid_times))
+    use_n = min(n_points, len(pairs))
     if use_n < 2:
         return None, None
 
-    t_term = valid_times[-use_n:]
-    c_term = valid_concs[-use_n:]
+    t_term = [t for t, _ in pairs[-use_n:]]
+    log_c = [math.log(c) for _, c in pairs[-use_n:]]
 
-    log_c = np.log(c_term)
-    slope, intercept, r_value, p_value, std_err = linregress(t_term, log_c)
+    mean_t = sum(t_term) / use_n
+    mean_log_c = sum(log_c) / use_n
+    ss_xx = sum((t - mean_t) ** 2 for t in t_term)
+    ss_yy = sum((c - mean_log_c) ** 2 for c in log_c)
+    ss_xy = sum((t - mean_t) * (c - mean_log_c) for t, c in zip(t_term, log_c))
+
+    if ss_xx <= 0:
+        return None, None
+
+    slope = ss_xy / ss_xx
 
     if slope >= 0:
         return None, None
 
-    return -slope, r_value ** 2
+    r_squared = (ss_xy ** 2) / (ss_xx * ss_yy) if ss_yy > 0 else 0.0
+    return -slope, r_squared
 
 
 def calculate_auc_full(times, concentrations, dose_interval=12.0):
@@ -186,9 +183,8 @@ def calculate_auc_full(times, concentrations, dose_interval=12.0):
       c_trough    : trough (pre-dose) concentration
       c_last      : last observed concentration
     """
-    np = _numpy()
-    times = np.array(times, dtype=float)
-    concs = np.array(concentrations, dtype=float)
+    times = [float(t) for t in times]
+    concs = [float(c) for c in concentrations]
 
     t_last = times[-1]
     c_last = float(concs[-1])
@@ -201,10 +197,10 @@ def calculate_auc_full(times, concentrations, dose_interval=12.0):
     t_half = None
 
     if lambda_z is not None and lambda_z > 0:
-        t_half = np.log(2) / lambda_z
+        t_half = math.log(2) / lambda_z
         remaining = dose_interval - t_last
         if remaining > 0:
-            auc_last_12 = (c_last / lambda_z) * (1 - np.exp(-lambda_z * remaining))
+            auc_last_12 = (c_last / lambda_z) * (1 - math.exp(-lambda_z * remaining))
             auc_0_interval = auc_0_last + auc_last_12
         else:
             auc_0_interval = auc_0_last

@@ -16,7 +16,31 @@ def app_base_dir() -> Path:
 
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def bundled_base_dir() -> Path:
+    """Directory containing read-only bundled resources."""
+    import sys
+
+    return Path(getattr(sys, "_MEIPASS", app_base_dir()))
+
+
+def asset_path(*parts: str) -> Path:
+    """Resolve an application asset from assets/ with legacy root fallback."""
+    rel = Path(*parts)
+    if rel.is_absolute():
+        return rel
+
+    bundled = bundled_base_dir()
+    dev_base = app_base_dir()
+    candidates = [
+        bundled / "assets" / rel,
+        bundled / rel,
+        dev_base / "assets" / rel,
+        dev_base / rel,
+    ]
+    return next((path for path in candidates if path.exists()), candidates[0])
 
 
 def data_dir() -> Path:

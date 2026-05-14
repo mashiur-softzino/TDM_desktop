@@ -2,9 +2,7 @@
 Activation Window - PyQt6 UI for license key entry
 """
 
-import os
 import re
-import sys
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -13,7 +11,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap
 
-from license_manager import LicenseManager
+from core.app_paths import asset_path
+from core.license_manager import LicenseManager
 
 
 LICENSE_KEY_PATTERN = re.compile(
@@ -107,10 +106,7 @@ class ActivationWindow(QDialog):
         logo_label = QLabel()
         logo_label.setFixedSize(62, 62)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        logo = QPixmap(os.path.join(base, "softzino.png"))
-        if logo.isNull():
-            logo = QPixmap(os.path.join(base, "SOFTZINO_LOGO.png"))
+        logo = QPixmap(str(asset_path("softzino.png")))
         if not logo.isNull():
             logo_label.setPixmap(logo.scaled(
                 54, 54,
@@ -147,7 +143,11 @@ class ActivationWindow(QDialog):
         section_title.setObjectName("sectionTitle")
         form_lay.addWidget(section_title)
 
-        section_sub = QLabel("Enter the Softzino-issued license key to unlock the TDM desktop app on this PC.")
+        section_sub = QLabel(
+            "Enter your Softzino-issued license key to activate TDM on this PC. "
+            "If you need help, please contact the Softzino team for license or "
+            "activation support."
+        )
         section_sub.setObjectName("sectionSub")
         section_sub.setWordWrap(True)
         form_lay.addWidget(section_sub)

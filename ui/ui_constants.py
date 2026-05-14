@@ -20,12 +20,14 @@ RED       = "#E53935"
 GREEN     = "#2E7D32"
 ORANGE    = "#F57C00"
 
-DEFAULT_DURATION_OPTIONS = [4, 6, 10]
+DEFAULT_DURATION_OPTIONS = [2, 3, 6]
 BASE_SAMPLE_TIMES = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0]
 
 
 def sampling_times_for_duration(duration: int) -> list:
     duration = max(1, int(duration))
+    if duration == 2:
+        return [0.5, 2.0]
     if duration <= len(BASE_SAMPLE_TIMES):
         return BASE_SAMPLE_TIMES[:duration]
     times = list(BASE_SAMPLE_TIMES)

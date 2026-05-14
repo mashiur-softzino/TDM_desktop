@@ -3,10 +3,10 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QDate, QDateTime, Qt
+from PyQt6.QtCore import QDate, QDateTime, QTimer, Qt
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
-from app_logger import (
+from core.app_logger import (
     log_draft_saved,
     log_error,
     log_record_deleted,
@@ -14,12 +14,12 @@ from app_logger import (
     log_report_generated,
     log_report_printed,
 )
-from calculations import calculate_auc_full, calculate_lss_auc, canonical_drug_name, interpret_result
-from database import delete_record, get_signatory_by_id, load_all, load_report_print_config, save_record
-from tdm_validators import is_valid_direct_auc, is_valid_phone
-from ui_constants import DEFAULT_DURATION_OPTIONS
-from ui_patients import PatientRow, ResultsDialog
-from ui_widgets import ConfirmActionModal
+from core.calculations import calculate_auc_full, calculate_lss_auc, canonical_drug_name, interpret_result
+from core.database import delete_record, get_signatory_by_id, load_all, load_report_print_config, save_record
+from core.tdm_validators import is_valid_direct_auc, is_valid_phone
+from ui.ui_constants import DEFAULT_DURATION_OPTIONS
+from ui.ui_patients import PatientRow, ResultsDialog
+from ui.ui_widgets import ConfirmActionModal
 
 
 class TDMWorkflowMixin:
@@ -459,13 +459,13 @@ class TDMWorkflowMixin:
         return re.sub(r'[<>:"/\\|?*]+', "_", stem).strip(" .") or "TDM_Report"
 
     def _expected_report_path(self, snapshot):
-        from app_paths import reports_dir
+        from core.app_paths import reports_dir
 
         return reports_dir() / f"{self._report_file_stem(snapshot)}.html"
 
     def _save_report_file(self, snapshot):
         try:
-            from report_print import build_report_html
+            from reports.report_print import build_report_html
 
             report_path = self._expected_report_path(snapshot)
             prep_id = snapshot.get("prepared_by_id")
@@ -504,7 +504,7 @@ class TDMWorkflowMixin:
             return
         report_path = snapshot.get("report_path")
         expected_path = self._expected_report_path(snapshot)
-        from report_print import build_report_html
+        from reports.report_print import build_report_html
 
         prep_id = snapshot.get("prepared_by_id")
         check_id = snapshot.get("checked_by_id")
@@ -545,12 +545,65 @@ class TDMWorkflowMixin:
         self._results_dialog.apply_results(pk, interp, times=times, concs=concs)
         has_data = bool(times and concs)
         self._results_dialog.set_graph_visible(has_data)
-        if has_data:
-            drug_name = getattr(self, "_last_drug", "MPA")
-            self._results_dialog.plot_data(times, concs, drug=drug_name)
         self._results_dialog.show()
         self._results_dialog.raise_()
         self._results_dialog.activateWindow()
+        if has_data:
+            dialog = self._results_dialog
+            drug_name = getattr(self, "_last_drug", "MPA")
+            QTimer.singleShot(
+                100,
+                lambda d=dialog, t=list(times), c=list(concs), drug=drug_name: self._plot_results_graph(d, t, c, drug),
+            )
+
+    def _plot_results_graph(self, dialog, times, concs, drug_name):
+        if dialog is None or dialog is not self._results_dialog:
+            return
+        try:
+            dialog.plot_data(times, concs, drug=drug_name)
+        except RuntimeError:
+            pass
+
+    def _queue_generated_report_save(self, snapshot, existing_id, active_source, form_signature, was_updating=False, show_result_toast=False):
+        self._reset_to_sample_list_on_result_close = True
+        QTimer.singleShot(
+            150,
+            lambda: self._persist_generated_report(
+                snapshot,
+                existing_id,
+                active_source,
+                form_signature,
+                was_updating=was_updating,
+                show_result_toast=show_result_toast,
+            ),
+        )
+
+    def _persist_generated_report(self, snapshot, existing_id, active_source, form_signature, was_updating=False, show_result_toast=False):
+        try:
+            if active_source == "sample" and existing_id is not None:
+                snapshot["id"] = existing_id
+            if active_source == "draft" and existing_id:
+                delete_record(existing_id)
+            save_record(snapshot, "sample")
+            saved_path = self._save_report_file(snapshot)
+            snapshot["report_path"] = saved_path or ""
+            save_record(snapshot, "sample")
+            self._report_snapshot = snapshot
+            self._active_record_id = snapshot["id"]
+            self._active_record_source = "sample"
+            self._loaded_form_signature = form_signature
+            self._load_saved_patients()
+            self._reset_list_view(getattr(self, "sample_list_card", None))
+            self._refresh_patients_list()
+            if show_result_toast and self._results_dialog is not None:
+                if was_updating:
+                    self._results_dialog.show_toast("Report updated", "Generated result has been updated successfully.")
+                else:
+                    self._results_dialog.show_toast("Report generated", "Generated result has been saved successfully.")
+            self._reset_to_sample_list_on_result_close = True
+        except Exception as exc:
+            log_error("_persist_generated_report", exc)
+            self._show_toast("Save failed", "Generated result is shown, but the report could not be saved.", tone="error")
 
     def _on_results_dialog_closed(self, _result):
         self._results_dialog = None
@@ -609,22 +662,13 @@ class TDMWorkflowMixin:
             self._apply_results(pk, interp)
             snapshot = self._snapshot_payload()
             existing_id = getattr(self, "_active_record_id", None)
-            if getattr(self, "_active_record_source", None) == "sample" and existing_id is not None:
-                snapshot["id"] = existing_id
-            if getattr(self, "_active_record_source", None) == "draft" and existing_id:
-                delete_record(existing_id)
-            save_record(snapshot, "sample")
-            saved_path = self._save_report_file(snapshot)
-            snapshot["report_path"] = saved_path or ""
-            save_record(snapshot, "sample")
-            self._report_snapshot = snapshot
-            self._active_record_id = snapshot["id"]
-            self._active_record_source = "sample"
-            self._loaded_form_signature = self._form_signature()
-            self._load_saved_patients()
-            self._reset_list_view(getattr(self, "sample_list_card", None))
-            self._refresh_patients_list()
-            self._reset_to_sample_list_on_result_close = True
+            active_source = getattr(self, "_active_record_source", None)
+            self._queue_generated_report_save(
+                snapshot,
+                existing_id,
+                active_source,
+                self._form_signature(),
+            )
             return
 
         times, concs = self._read_table(skip_empty=False)
@@ -660,28 +704,16 @@ class TDMWorkflowMixin:
 
         snapshot = self._snapshot_payload()
         existing_id = getattr(self, "_active_record_id", None)
-        was_updating = getattr(self, "_active_record_source", None) == "sample" and bool(existing_id)
-        if getattr(self, "_active_record_source", None) == "sample" and existing_id is not None:
-            snapshot["id"] = existing_id
-        if getattr(self, "_active_record_source", None) == "draft" and existing_id:
-            delete_record(existing_id)
-        save_record(snapshot, "sample")
-        saved_path = self._save_report_file(snapshot)
-        snapshot["report_path"] = saved_path or ""
-        save_record(snapshot, "sample")
-        self._report_snapshot = snapshot
-        self._active_record_id = snapshot["id"]
-        self._active_record_source = "sample"
-        self._loaded_form_signature = self._form_signature()
-        self._load_saved_patients()
-        self._reset_list_view(getattr(self, "sample_list_card", None))
-        self._refresh_patients_list()
-        if self._results_dialog is not None:
-            if was_updating:
-                self._results_dialog.show_toast("Report updated", "Generated result has been updated successfully.")
-            else:
-                self._results_dialog.show_toast("Report generated", "Generated result has been saved successfully.")
-        self._reset_to_sample_list_on_result_close = True
+        active_source = getattr(self, "_active_record_source", None)
+        was_updating = active_source == "sample" and bool(existing_id)
+        self._queue_generated_report_save(
+            snapshot,
+            existing_id,
+            active_source,
+            self._form_signature(),
+            was_updating=was_updating,
+            show_result_toast=True,
+        )
 
     def _print_report(self):
         if not hasattr(self, "_last_pk"):
@@ -736,10 +768,8 @@ class TDMWorkflowMixin:
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
-        if hasattr(self, "prep_by_combo"):
-            self.prep_by_combo.setCurrentIndex(0)
-        if hasattr(self, "checked_by_combo"):
-            self.checked_by_combo.setCurrentIndex(0)
+        if hasattr(self, "prep_by_combo") and hasattr(self, "checked_by_combo"):
+            self._refresh_signatory_combos(select_prep_id=0, select_check_id=0)
         self.f_tx_date.setDate(None)
         self.f_invoice_date.setDate(QDate.currentDate())
         self.f_delivery_date.setDate(QDate.currentDate())

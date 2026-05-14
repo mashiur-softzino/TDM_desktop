@@ -2,10 +2,10 @@
 Sampling-related UI classes: sample table rows, gradient chart, medication selector.
 """
 
-from ui_constants import (
+from ui.ui_constants import (
     BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
 )
-from ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
+from ui.ui_widgets import Card, make_shadow, small_label, value_label, ToastMessage, ConfirmActionModal
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
@@ -18,8 +18,8 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QColor, QDoubleValidator
 import qtawesome as qta
-from database import load_medications, add_medication, update_medication, delete_medication
-from calculations import canonical_drug_name
+from core.database import load_medications, add_medication, update_medication, delete_medication
+from core.graph_utils import draw_concentration_time_graph
 
 
 # Rainbow palette — one colour per row position (up to 10)
@@ -350,63 +350,17 @@ class GradientCanvas(QWidget):
             pass
 
     def plot(self, times, concs, drug='MPA'):
-        import numpy as np
-        from matplotlib.collections import LineCollection
-        import matplotlib.pyplot as plt
-
         self.ax.clear()
-        times = np.array(times, dtype=float)
-        concs = np.array(concs, dtype=float)
-        order = np.argsort(times)
-        times = times[order]
-        concs = concs[order]
-
-        self.ax.set_facecolor('white')
-        self.ax.grid(True, linestyle='--', color='#EEEEEE', alpha=0.9, zorder=0)
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-        self.ax.spines['left'].set_color(BORDER)
-        self.ax.spines['bottom'].set_color(BORDER)
-        self.ax.tick_params(colors='#9E9E9E', labelsize=10)
-
-        t_fine = times
-        c_fine = concs
-        points = np.array([t_fine, c_fine]).T.reshape(-1, 1, 2)
-        segs = np.concatenate([points[:-1], points[1:]], axis=1)
-        norm = plt.Normalize(t_fine[0], t_fine[-1] if t_fine[-1] != t_fine[0] else t_fine[0] + 1)
-        lc = LineCollection(segs, cmap='rainbow', norm=norm, linewidth=2.8, zorder=3)
-        lc.set_array(t_fine)
-        self.ax.add_collection(lc)
-
-        n_fill = 80
-        t_segs = np.linspace(t_fine[0], t_fine[-1], n_fill + 1)
-        for i in range(n_fill):
-            ts = t_segs[i:i + 2]
-            cs_seg = np.interp(ts, times, concs)
-            col = plt.cm.rainbow(norm(t_segs[i]))
-            self.ax.fill_between(ts, 0, cs_seg, color=col, alpha=0.18, zorder=1)
-
-        dot_colors = plt.cm.rainbow(np.linspace(0, 1, len(times)))
-        for t, c, col in zip(times, concs, dot_colors):
-            self.ax.scatter(t, c, color=col, s=90, zorder=5,
-                            edgecolors='white', linewidth=2)
-
-        self.ax.annotate(
-            'Trough', (times[0], concs[0]),
-            xytext=(8, 12), textcoords='offset points',
-            color=RED, fontsize=9, fontweight='bold',
-            arrowprops=dict(arrowstyle='-', color=RED, lw=1)
+        draw_concentration_time_graph(
+            self.ax, times, concs, drug=drug,
+            title_size=13,
+            label_size=11,
+            tick_size=10,
+            axis_color=BORDER,
+            tick_color="#9E9E9E",
+            title_color="#1A1A2E",
+            red=RED,
         )
-
-        conc_unit = '??g/mL' if canonical_drug_name(drug) == 'MPA' else 'ng/mL'
-        self.ax.set_xlabel('Time (min)', fontsize=11, color='#9E9E9E', labelpad=8)
-        self.ax.set_ylabel(f'Conc. ({conc_unit})', fontsize=11, color='#9E9E9E', labelpad=8)
-        self.ax.set_title('Concentration-Time Graph', fontsize=13,
-                          fontweight='bold', color='#1A1A2E', pad=14)
-        self.ax.set_xlim(left=0, right=times[-1])
-        self.ax.set_xticks(times)
-        self.ax.set_xticklabels([f"{int(t * 60)}" for t in times])
-        self.ax.set_ylim(bottom=0)
         self.fig.subplots_adjust(left=0.09, right=0.97, top=0.88, bottom=0.20)
         self._canvas.draw()
 
@@ -771,8 +725,12 @@ class DrugSelector(QFrame):
         self.setStyleSheet("background: transparent;")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._selected = self.DRUG_OPTIONS[0]
+        self._app_event_filter_installed = False
 
-        QApplication.instance().installEventFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self._app_event_filter_installed = True
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -842,6 +800,22 @@ class DrugSelector(QFrame):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
         """)
         drop_lay.addWidget(self._list)
+
+    def _remove_app_event_filter(self):
+        if not getattr(self, "_app_event_filter_installed", False):
+            return
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        self._app_event_filter_installed = False
+
+    def event(self, event):
+        if event.type() in (QEvent.Type.Close, QEvent.Type.DeferredDelete):
+            self._remove_app_event_filter()
+        return super().event(event)
 
     def _apply_selected_style(self):
         self._search.blockSignals(True)
@@ -1035,9 +1009,13 @@ class MedicationSelector(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._all_meds = load_medications()
         self._selected: list = []
+        self._app_event_filter_installed = False
 
         # Install app-level mouse press filter to detect outside clicks
-        QApplication.instance().installEventFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self._app_event_filter_installed = True
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1204,6 +1182,22 @@ class MedicationSelector(QFrame):
         """)
         outer.addWidget(self._tags_scroll)
         self._update_tags_visibility()
+
+    def _remove_app_event_filter(self):
+        if not getattr(self, "_app_event_filter_installed", False):
+            return
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        self._app_event_filter_installed = False
+
+    def event(self, event):
+        if event.type() in (QEvent.Type.Close, QEvent.Type.DeferredDelete):
+            self._remove_app_event_filter()
+        return super().event(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1429,9 +1423,11 @@ class MedicationSelector(QFrame):
         if name in self._selected:
             self._selected.remove(name)
         for i in range(self._tags_layout.count()):
-            w = self._tags_layout.itemAt(i)
-            if w and isinstance(w.widget(), MedTag) and w.widget().name == name:
-                w.widget().deleteLater()
+            item = self._tags_layout.itemAt(i)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, MedTag) and widget.name == name:
+                self._tags_layout.takeAt(i)
+                widget.deleteLater()
                 break
         self._update_tags_visibility()
         self.selection_changed.emit()

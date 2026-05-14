@@ -4,31 +4,31 @@ Main window only. All helper classes/constants are in ui_constants, ui_widgets,
 ui_sampling, and ui_patients.
 """
 
-import sys
-from database import (
+from core.database import (
     init_db,
     load_duration_options, save_duration_options, load_medications,
     add_medication, update_medication, delete_medication,
     load_signatories,
-    set_signatory_active
+    set_signatory_active,
+    get_signatory_by_id,
 )
 import tempfile
 from datetime import datetime
-from pathlib import Path
 
-from ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
+from ui.ui_constants import (BLUE, LABEL_CLR, TEXT_CLR, BORDER, RED,
                            DEFAULT_DURATION_OPTIONS,
                            BASE_SAMPLE_TIMES, STYLE,
                            sampling_times_for_duration, make_shadow, small_label)
-from ui_widgets import (Card, DurationEditModal, DurationChip,
+from ui.ui_widgets import (Card, DurationEditModal, DurationChip,
                         NoWheelComboBox, SmartDateEdit, SmartDateTimeEdit,
                         ToastMessage, ConfirmActionModal, AlertModal)
-from ui_sampling import ModernSampleTable, MedicationSelector, GradientCanvas
-from ui_patients import ResultsDialog, PatientRow, PatientsListCard, SignatoryRow, SignatoriesListCard
-from ui_signatory import SignatoryEditModal
-from ui_settings import build_settings_page
-from tdm_validators import is_valid_direct_auc, is_valid_phone
-from tdm_workflow import TDMWorkflowMixin
+from ui.ui_sampling import ModernSampleTable, MedicationSelector, GradientCanvas
+from ui.ui_patients import ResultsDialog, PatientRow, PatientsListCard, SignatoryRow, SignatoriesListCard
+from ui.ui_signatory import SignatoryEditModal
+from ui.ui_settings import build_settings_page
+from core.tdm_validators import is_valid_direct_auc, is_valid_phone
+from core.app_paths import asset_path
+from app.tdm_workflow import TDMWorkflowMixin
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -41,15 +41,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRect, QDate, QDateTime, QObject, QEvent, QSize, QRegularExpression, QPoint, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QBrush, QPen, QPalette, QIntValidator, QRegularExpressionValidator, QPixmap, QImage, QDoubleValidator, QIcon
 import qtawesome as qta
-from calculations import calculate_auc_full, calculate_lss_auc, interpret_result, canonical_drug_name
+from core.calculations import calculate_auc_full, calculate_lss_auc, interpret_result, canonical_drug_name
 
 class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
     def __init__(self, duration_options=None, db_initialized=False):
         super().__init__()
         self.setWindowTitle("TDM Report — Therapeutic Drug Monitoring")
-        icon_base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         for icon_name in ("tdm_logo_icon.png", "tdm_logo.png", "tdm_logo.ico"):
-            icon = QIcon(str(icon_base / icon_name))
+            icon = QIcon(str(asset_path(icon_name)))
             if not icon.isNull():
                 self.setWindowIcon(icon)
                 break
@@ -599,7 +598,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
                 self._refresh_signatory_combos()
         except Exception as exc:
             signatories_ok = False
-            from app_logger import log_error
+            from core.app_logger import log_error
             log_error("_refresh_current_page", exc)
 
         if patients_ok and signatories_ok:
@@ -725,9 +724,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         mark = QLabel()
         mark.setFixedSize(118, 24)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-        logo_path = logo_base / "softzino.png"
-        pixmap = QPixmap(str(logo_path))
+        pixmap = QPixmap(str(asset_path("softzino.png")))
         if not pixmap.isNull():
             image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
             for y in range(image.height()):
@@ -1570,26 +1567,47 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         return card
 
     def _refresh_signatory_combos(self, select_prep_id=None, select_check_id=None):
+        include_selected_inactive = select_prep_id is not None or select_check_id is not None
+        if select_prep_id is None:
+            select_prep_id = self.prep_by_combo.currentData()
+        if select_check_id is None:
+            select_check_id = self.checked_by_combo.currentData()
+
         signatories = load_signatories()
-        self.prep_by_combo.clear()
-        self.checked_by_combo.clear()
-        
-        self.prep_by_combo.addItem("Select Technologist...", 0)
-        self.checked_by_combo.addItem("Select Doctor...", 0)
-        
-        for d in reversed(signatories):
-            dtype = d.get('type', 'doctor')
-            if dtype == 'technologist':
-                self.prep_by_combo.addItem(d['name'], d['id'])
-            else:
-                self.checked_by_combo.addItem(d['name'], d['id'])
-            
-        if select_prep_id:
-            idx = self.prep_by_combo.findData(select_prep_id)
-            if idx >= 0: self.prep_by_combo.setCurrentIndex(idx)
-        if select_check_id:
-            idx = self.checked_by_combo.findData(select_check_id)
-            if idx >= 0: self.checked_by_combo.setCurrentIndex(idx)
+        prep_was_blocked = self.prep_by_combo.blockSignals(True)
+        check_was_blocked = self.checked_by_combo.blockSignals(True)
+        try:
+            self.prep_by_combo.clear()
+            self.checked_by_combo.clear()
+
+            self.prep_by_combo.addItem("Select Technologist...", 0)
+            self.checked_by_combo.addItem("Select Doctor...", 0)
+
+            if include_selected_inactive:
+                selected_ids = {sid for sid in (select_prep_id, select_check_id) if sid}
+                loaded_ids = {d.get('id') for d in signatories}
+                for sid in selected_ids - loaded_ids:
+                    inactive = get_signatory_by_id(sid)
+                    if inactive:
+                        inactive['name'] = f"{inactive.get('name', 'Unknown')} (Inactive)"
+                        signatories.insert(0, inactive)
+
+            for d in reversed(signatories):
+                dtype = d.get('type', 'doctor')
+                if dtype == 'technologist':
+                    self.prep_by_combo.addItem(d['name'], d['id'])
+                else:
+                    self.checked_by_combo.addItem(d['name'], d['id'])
+
+            if select_prep_id:
+                idx = self.prep_by_combo.findData(select_prep_id)
+                if idx >= 0: self.prep_by_combo.setCurrentIndex(idx)
+            if select_check_id:
+                idx = self.checked_by_combo.findData(select_check_id)
+                if idx >= 0: self.checked_by_combo.setCurrentIndex(idx)
+        finally:
+            self.prep_by_combo.blockSignals(prep_was_blocked)
+            self.checked_by_combo.blockSignals(check_was_blocked)
 
     def _remove_duration_option(self, duration):
         if len(self._duration_options) <= 1:

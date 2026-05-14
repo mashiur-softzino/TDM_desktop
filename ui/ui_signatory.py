@@ -21,14 +21,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from database import (
+from core.database import (
     add_signatory,
     is_signatory_phone_exists,
     update_signatory,
 )
-from tdm_validators import validate_signature_file, is_valid_phone
-from ui_constants import BLUE, BORDER, TEXT_CLR, small_label
-from ui_widgets import ToastMessage
+from core.tdm_validators import validate_signature_file, is_valid_phone
+from ui.ui_constants import BLUE, BORDER, TEXT_CLR, small_label
+from ui.ui_widgets import ToastMessage
 
 
 class SignatoryEditModal(QDialog):

@@ -54,11 +54,14 @@ Download or copy the project folder to your machine. The folder should contain:
 ```
 AUC-sampler/
 ├── main.py
-├── tdm_report.py
-├── calculations.py
-├── report_print.py
+├── app/
+├── core/
+├── ui/
+├── reports/
+├── assets/
+│   └── signatures/
 ├── requirements.txt
-└── cal_icon.png
+└── seed_signatories.json
 ```
 
 ---
@@ -116,7 +119,7 @@ python3 main.py
 1. Fill in **Patient Information** (name, age, weight, hospital details)
 2. Fill in **Drug & Dose** (drug name, preparation, dose amount, dose date/time)
 3. Enter the **Trough** (pre-dose) concentration
-4. Select sampling scheme: **4h**, **6h**, or **10h**
+4. Select sampling scheme: **2h**, **3h**, or **6h**
 5. Enter measured **concentrations** for each time point
 6. Click **Calculate AUC & Generate Report**
 7. View results and graph, then click **Print / Export PDF**
@@ -127,9 +130,9 @@ python3 main.py
 
 | Scheme | Post-dose times (hours) |
 |--------|------------------------|
-| 4h     | 0.5, 1.0, 1.5, 2.0 |
+| 2h     | 0.5, 2.0 |
+| 3h     | 0.5, 1.0, 1.5 |
 | 6h     | 0.5, 1.0, 1.5, 2.0, 2.5, 3.0 |
-| 10h    | 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0 |
 
 Trough (pre-dose) is always collected and entered separately.
 All time values in the table are editable.
@@ -152,7 +155,8 @@ All time values in the table are editable.
 | File | Purpose |
 |------|---------|
 | `main.py` | Entry point — launches the application |
-| `tdm_report.py` | Full UI — all widgets and window logic |
-| `calculations.py` | PK math — AUC, λz, t½, LSS equations |
-| `report_print.py` | Print/PDF report layout |
+| `app/` | Main window and report workflow orchestration |
+| `core/` | Database, PK calculations, logging, app paths, validation |
+| `ui/` | Reusable PyQt widgets, pages, dialogs, and form controls |
+| `reports/` | Print/PDF report rendering |
 | `requirements.txt` | Python package dependencies |

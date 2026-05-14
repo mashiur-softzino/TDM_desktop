@@ -5,12 +5,12 @@ TDM Report — Database layer (PostgreSQL)
 import json
 import mimetypes
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
+from core.app_paths import asset_path
 
 DEFAULT_MEDICATIONS_SEED = [
     "Tacrolimus (TAC)", "Cyclosporine (CsA)", "Mycophenolate (MPA)",
@@ -78,7 +78,7 @@ def _connect() -> _ConnWrapper:
     if env_url:
         conn = psycopg2.connect(env_url)
     else:
-        from db_config import load_db_config
+        from core.db_config import load_db_config
         c = load_db_config()
         conn = psycopg2.connect(
             host=c['host'],
@@ -91,12 +91,8 @@ def _connect() -> _ConnWrapper:
     return _ConnWrapper(conn)
 
 
-def _asset_base_dir() -> Path:
-    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-
-
 def _load_default_signatories() -> list:
-    seed_path = _asset_base_dir() / DEFAULT_SIGNATORY_SEED_FILE
+    seed_path = asset_path(DEFAULT_SIGNATORY_SEED_FILE)
     if not seed_path.exists():
         return []
     try:
@@ -133,7 +129,7 @@ def _seed_default_signatories(conn) -> int:
         signature_data = None
         signature_mime = None
         if signature_path:
-            path = _asset_base_dir() / signature_path
+            path = asset_path(signature_path)
             try:
                 if path.exists() and path.stat().st_size <= 2 * 1024 * 1024:
                     signature_data = path.read_bytes()
@@ -202,77 +198,6 @@ def _parse_duration_options(value, default_options: list) -> list:
         return cleaned or list(default_options)
     except Exception:
         return list(default_options)
-
-
-def _ensure_legacy_schema_compat(conn) -> None:
-    """Add columns needed by older installed databases."""
-    for table in ("patients", "drafts"):
-        _ensure_ref_by_column(conn, table)
-
-    legacy_columns = [
-        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_data BYTEA",
-        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS signature_mime TEXT",
-        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'doctor'",
-        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS phone TEXT",
-        "ALTER TABLE signatories ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
-        "ALTER TABLE records ADD COLUMN IF NOT EXISTS prepared_by_id INTEGER REFERENCES signatories(id)",
-        "ALTER TABLE records ADD COLUMN IF NOT EXISTS checked_by_id INTEGER REFERENCES signatories(id)",
-        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS prepared_by_id INTEGER REFERENCES signatories(id)",
-        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS checked_by_id INTEGER REFERENCES signatories(id)",
-    ]
-    for sql in legacy_columns:
-        conn.execute(sql)
-
-
-def _column_exists(conn, table: str, column: str) -> bool:
-    row = conn.execute(
-        """SELECT 1
-           FROM information_schema.columns
-           WHERE table_schema = current_schema()
-             AND table_name = %s
-             AND column_name = %s""",
-        (table, column),
-    ).fetchone()
-    return row is not None
-
-
-def _ensure_ref_by_column(conn, table: str) -> None:
-    if table not in {"patients", "drafts"}:
-        return
-    has_dept = _column_exists(conn, table, "dept")
-    has_ref_by = _column_exists(conn, table, "ref_by")
-    if has_dept and not has_ref_by:
-        conn.execute(f"ALTER TABLE {table} RENAME COLUMN dept TO ref_by")
-    elif not has_ref_by:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN ref_by TEXT")
-    elif has_dept:
-        conn.execute(f"UPDATE {table} SET ref_by = COALESCE(ref_by, dept)")
-        conn.execute(f"ALTER TABLE {table} DROP COLUMN dept")
-
-
-def _migrate_legacy_signature_files(conn) -> None:
-    legacy_sigs = conn.execute(
-        """SELECT id, signature_path
-           FROM signatories
-           WHERE signature_data IS NULL
-             AND signature_path IS NOT NULL
-             AND signature_path <> ''"""
-    ).fetchall()
-    for sig in legacy_sigs:
-        path = Path(sig['signature_path'])
-        try:
-            if not path.exists() or path.stat().st_size > 2 * 1024 * 1024:
-                continue
-            data = path.read_bytes()
-            mime = mimetypes.guess_type(str(path))[0] or "image/png"
-            conn.execute(
-                """UPDATE signatories
-                   SET signature_data = %s, signature_mime = %s
-                   WHERE id = %s""",
-                (psycopg2.Binary(data), mime, sig['id'])
-            )
-        except OSError:
-            continue
 
 
 def init_db(default_duration_options: list | None = None):
@@ -399,8 +324,17 @@ def init_db(default_duration_options: list | None = None):
                 checked_by_id          INTEGER REFERENCES signatories(id)
             )
         """)
-        _ensure_legacy_schema_compat(conn)
-        _migrate_legacy_signature_files(conn)
+        if default_duration_options is not None:
+            conn.execute(
+                """INSERT INTO app_settings (key, value) VALUES ('duration_options', %s)
+                   ON CONFLICT (key) DO NOTHING""",
+                (json.dumps(default_duration_options),)
+            )
+        conn.execute(
+            """INSERT INTO app_settings (key, value) VALUES ('report_print_config', %s)
+               ON CONFLICT (key) DO NOTHING""",
+            (json.dumps(DEFAULT_REPORT_PRINT_CONFIG),)
+        )
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute(
                 "INSERT INTO medications (name) VALUES (%s) ON CONFLICT DO NOTHING",

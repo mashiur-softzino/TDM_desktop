@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 import traceback
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -26,6 +26,16 @@ def _log_dir() -> Path:
 
 
 LOG_DIR = _log_dir()
+LOG_RETENTION_DAYS = {
+    "app": 30,
+    "error": 90,
+    "audit": 365,
+}
+LOG_SUBDIRS = {
+    "app": "app_logs",
+    "error": "error_logs",
+    "audit": "audit_logs",
+}
 
 _FMT_APP   = "%(asctime)s | %(levelname)-8s | %(message)s"
 _FMT_ERROR = "%(asctime)s | %(levelname)-8s | %(pathname)s:%(lineno)d | %(message)s"
@@ -45,7 +55,7 @@ class _DailyFileHandler(logging.FileHandler):
         self.setFormatter(logging.Formatter(fmt, datefmt=_DATE_FMT))
 
     def _dated_path(self) -> Path:
-        return LOG_DIR / f"{self._prefix}_{self._log_date.isoformat()}.log"
+        return _log_type_dir(self._prefix) / f"{self._prefix}_{self._log_date.isoformat()}.log"
 
     def emit(self, record: logging.LogRecord):
         today = date.today()
@@ -69,10 +79,35 @@ audit_log.setLevel(logging.DEBUG)
 
 def _add_file_handler(logger: logging.Logger, prefix: str, level: int, fmt: str):
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _log_type_dir(prefix).mkdir(parents=True, exist_ok=True)
+        _cleanup_old_logs(prefix)
         logger.addHandler(_DailyFileHandler(prefix, level, fmt))
     except Exception:
         logger.addHandler(logging.NullHandler())
+
+
+def _log_type_dir(prefix: str) -> Path:
+    return LOG_DIR / LOG_SUBDIRS.get(prefix, f"{prefix}_logs")
+
+
+def _cleanup_old_logs(prefix: str):
+    retention_days = LOG_RETENTION_DAYS.get(prefix)
+    if retention_days is None:
+        return
+
+    folder = _log_type_dir(prefix)
+    cutoff = date.today() - timedelta(days=retention_days)
+    for path in folder.glob(f"{prefix}_*.log"):
+        try:
+            date_part = path.stem.removeprefix(f"{prefix}_")
+            log_date = date.fromisoformat(date_part)
+        except (OSError, ValueError):
+            continue
+        if log_date < cutoff:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
 
 _add_file_handler(app_log, "app", logging.INFO, _FMT_APP)

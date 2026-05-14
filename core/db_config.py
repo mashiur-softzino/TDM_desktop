@@ -4,7 +4,7 @@ Database connection config — saved to a JSON file in the app data directory.
 
 import json
 from pathlib import Path
-from app_paths import ensure_data_dirs
+from core.app_paths import ensure_data_dirs
 
 DEFAULT_CONFIG = {
     'host':     'localhost',

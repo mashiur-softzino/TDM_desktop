@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('tdm_logo.png', '.'), ('tdm_logo_icon.png', '.'), ('tdm_logo.ico', '.'), ('softzino.png', '.'), ('seed_signatories.json', '.'), ('Signature', 'Signature')],
+    datas=[('assets', 'assets'), ('seed_signatories.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['tdm_logo.ico'],
+    icon=['assets/tdm_logo.ico'],
 )
 coll = COLLECT(
     exe,

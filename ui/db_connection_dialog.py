@@ -2,8 +2,6 @@
 Database connection dialog — shown at startup when DB is unreachable.
 """
 
-import os
-import sys
 import psycopg2
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -13,9 +11,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 import qtawesome as qta
 
-from db_config import load_db_config, save_db_config
-from ui_constants import TEXT_CLR, BLUE
-from ui_widgets import AlertModal
+from core.app_paths import asset_path
+from core.db_config import load_db_config, save_db_config
+from ui.ui_constants import TEXT_CLR, BLUE
+from ui.ui_widgets import AlertModal
 
 
 class DBConnectionDialog(QDialog):
@@ -43,10 +42,7 @@ class DBConnectionDialog(QDialog):
         h_lay.setContentsMargins(28, 0, 28, 0)
         h_lay.setSpacing(12)
 
-        base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        logo_px = QPixmap(os.path.join(base_path, "softzino.png"))
-        if logo_px.isNull():
-            logo_px = QPixmap(os.path.join(base_path, "SOFTZINO_LOGO.png"))
+        logo_px = QPixmap(str(asset_path("softzino.png")))
         logo_lbl = QLabel()
         logo_lbl.setStyleSheet("background: transparent;")
         if not logo_px.isNull():
