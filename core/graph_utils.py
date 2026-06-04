@@ -28,8 +28,8 @@ def draw_concentration_time_graph(ax, times, concs, drug: str = "MPA", *,
                                   title_size=12, label_size=10,
                                   tick_size=9, line_width=2.6,
                                   point_size=42, point_edge_width=1.4,
-                                  axis_color="#E8ECF0",
-                                  tick_color="#9E9E9E",
+                                  axis_color="#000000",
+                                  tick_color="#000000",
                                   title_color="#1A1A2E",
                                   red="#E53935"):
     plot_times = np.array(times, dtype=float)
@@ -45,6 +45,8 @@ def draw_concentration_time_graph(ax, times, concs, drug: str = "MPA", *,
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color(axis_color)
     ax.spines["bottom"].set_color(axis_color)
+    ax.spines["left"].set_linewidth(2.0)
+    ax.spines["bottom"].set_linewidth(2.0)
     ax.tick_params(colors=tick_color, labelsize=tick_size)
 
     if plot_times.size < 1:
@@ -61,10 +63,10 @@ def draw_concentration_time_graph(ax, times, concs, drug: str = "MPA", *,
         points = np.array([t_fine, c_fine]).T.reshape(-1, 1, 2)
         segs = np.concatenate([points[:-1], points[1:]], axis=1)
         lc = LineCollection(segs, cmap="rainbow", norm=norm, linewidth=line_width, zorder=3)
-        lc.set_array(t_fine)
+        lc.set_array(t_fine[:-1])
         ax.add_collection(lc)
 
-        n_fill = 80
+        n_fill = 100
         t_segs = np.linspace(t_fine[0], t_fine[-1], n_fill + 1)
         for i in range(n_fill):
             ts = t_segs[i:i + 2]
@@ -72,7 +74,7 @@ def draw_concentration_time_graph(ax, times, concs, drug: str = "MPA", *,
             ax.fill_between(
                 ts, 0, cs_seg,
                 color=plt.cm.rainbow(norm(t_segs[i])),
-                alpha=0.18,
+                alpha=1.0,
                 zorder=1,
             )
 
@@ -96,10 +98,12 @@ def draw_concentration_time_graph(ax, times, concs, drug: str = "MPA", *,
     y_top, y_ticks = concentration_y_axis(plot_concs)
     ax.set_xlim(left=0, right=plot_times[-1])
     ax.set_xticks(plot_times)
-    ax.set_xticklabels([f"{int(t * 60)}" for t in plot_times])
+    ax.set_xticklabels([f"{t:g}" for t in plot_times])
     ax.set_ylim(bottom=0, top=y_top)
     ax.set_yticks(y_ticks)
-    ax.set_xlabel("Time (min)", fontsize=label_size, fontweight="bold")
+    for tick_label in ax.get_xticklabels() + ax.get_yticklabels():
+        tick_label.set_fontweight("bold")
+    ax.set_xlabel("Time (hours)", fontsize=label_size, fontweight="bold")
     ax.set_ylabel(f"Conc. ({concentration_unit(drug)})", fontsize=label_size, fontweight="bold")
     ax.set_title(
         "Concentration-Time Graph",

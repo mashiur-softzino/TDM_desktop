@@ -7,21 +7,42 @@ from ui.ui_constants import (
     BG, CARD_BG, BLUE, BLUE_DARK, NAVY, LABEL_CLR, TEXT_CLR,
     BORDER, RED, GREEN, ORANGE,
 )
-from ui.ui_widgets import Card, StatBox, IconCircle, ToastMessage, make_shadow
+from ui.ui_widgets import Card, StatBox, IconCircle, ToastMessage, make_shadow, NoWheelComboBox
 from ui.ui_sampling import GradientCanvas
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QFrame, QScrollArea, QPushButton,
-    QDialog, QSizePolicy, QApplication,
+    QDialog, QSizePolicy, QApplication, QPlainTextEdit,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 import qtawesome as qta
+import os
+import tempfile
 from core.calculations import interpret_result
 
 
+REPORT_COMMENT_OPTIONS = [
+    "Select any comment",
+    "Clinical correlation is advised.",
+    "MPA test result is negative. No abnormal finding detected.",
+    "No evidence of infection/abnormality detected in this test.",
+    "Result is within normal limit. Clinical correlation is advised.",
+    "MPA test result is positive. Further clinical correlation is recommended.",
+    "Abnormal finding detected. Please correlate with clinical history and other investigations.",
+    "Positive result should be interpreted along with patient symptoms and physician evaluation.",
+    "Result is borderline/equivocal. Repeat test may be considered if clinically indicated.",
+    "Finding is inconclusive. Clinical correlation and repeat testing are advised.",
+    "Please consult the referring physician for final interpretation.",
+    "Laboratory findings alone may not confirm diagnosis without clinical correlation.",
+    "Result should be correlated with patient's clinical history and physician's evaluation.",
+]
+
+
 class ResultsDialog(QDialog):
+    comment_saved = pyqtSignal(str)
+
     def __init__(self, parent=None, print_handler=None):
         super().__init__(parent)
         self.setWindowTitle("Generated Result")
@@ -150,6 +171,75 @@ class ResultsDialog(QDialog):
         self.canvas = None
         content_lay.addWidget(self.graph_card)
         self.graph_card.hide()  # Hidden by default, shown when data is available
+
+        self.comment_card = Card("Comment", "mdi6.comment-text-outline", icon_color=BLUE)
+        self.comment_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        comment_body = self.comment_card.body()
+
+        arrow_path = os.path.join(tempfile.gettempdir(), "tdm_comment_arrow_down.png")
+        qta.icon("mdi6.chevron-down", color="#6B8CAE").pixmap(14, 14).save(arrow_path)
+        arrow_path = arrow_path.replace("\\", "/")
+
+        self.comment_combo = NoWheelComboBox()
+        self.comment_combo.addItems(REPORT_COMMENT_OPTIONS)
+        self.comment_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: #F7FAFE;
+                border: 1.5px solid {BORDER};
+                border-radius: 10px;
+                padding: 8px 36px 8px 12px;
+                font-size: 12px;
+                color: {TEXT_CLR};
+            }}
+            QComboBox:focus {{ border: 1.5px solid {BLUE}; background: white; }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 34px;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{arrow_path}");
+                width: 14px;
+                height: 14px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: white;
+                border: 1px solid #D8E6F5;
+                selection-background-color: #E8F0FE;
+                selection-color: {TEXT_CLR};
+                padding: 4px;
+            }}
+        """)
+        self.comment_combo.currentTextChanged.connect(self._on_comment_selected)
+        comment_body.addWidget(self.comment_combo)
+
+        self.comment_edit = QPlainTextEdit()
+        self.comment_edit.setFixedHeight(78)
+        self.comment_edit.setPlaceholderText("Write report comment")
+        self.comment_edit.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background: white;
+                border: 1.5px solid {BORDER};
+                border-radius: 12px;
+                padding: 10px 12px;
+                font-size: 13px;
+                color: {TEXT_CLR};
+            }}
+            QPlainTextEdit:focus {{ border: 1.5px solid {BLUE}; }}
+        """)
+        comment_body.addWidget(self.comment_edit)
+
+        comment_btn_row = QHBoxLayout()
+        comment_btn_row.addStretch()
+        self.save_comment_btn = QPushButton("Save Comment")
+        self.save_comment_btn.setObjectName("printBtn")
+        self.save_comment_btn.setAutoDefault(False)
+        self.save_comment_btn.setDefault(False)
+        self.save_comment_btn.clicked.connect(self._on_save_comment)
+        comment_btn_row.addWidget(self.save_comment_btn)
+        comment_body.addLayout(comment_btn_row)
+        content_lay.addWidget(self.comment_card)
         content_lay.addStretch(1)
 
         scroll.setWidget(content)
@@ -172,6 +262,32 @@ class ResultsDialog(QDialog):
         if self._print_handler is not None:
             self._print_handler()
         self.close()
+
+    def _on_comment_selected(self, text):
+        if text == REPORT_COMMENT_OPTIONS[0]:
+            self.comment_edit.clear()
+            return
+        self.comment_edit.setPlainText(text)
+
+    def _on_save_comment(self):
+        self.comment_saved.emit(self.get_report_comment())
+        self.show_toast("Comment saved", "Report comment has been updated successfully.")
+
+    def get_report_comment(self):
+        return self.comment_edit.toPlainText().strip()
+
+    def set_report_comment(self, comment):
+        comment = (comment or "").strip()
+        self.comment_edit.setPlainText(comment)
+        index = self.comment_combo.findText(comment)
+        if index >= 0:
+            self.comment_combo.blockSignals(True)
+            self.comment_combo.setCurrentIndex(index)
+            self.comment_combo.blockSignals(False)
+        else:
+            self.comment_combo.blockSignals(True)
+            self.comment_combo.setCurrentIndex(0)
+            self.comment_combo.blockSignals(False)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -418,6 +534,7 @@ class PatientReportDialog(QDialog):
             interp=snapshot.get('interp', 'N/A'),
             times=snapshot.get('times', []),
             concs=snapshot.get('concs', []),
+            report_comment=snapshot.get('report_comment', ''),
         )
 
         scroll = QScrollArea()

@@ -22,6 +22,68 @@ from PyQt6.QtGui import (
     QColor, QPainter, QBrush, QPalette, QIntValidator,
 )
 import qtawesome as qta
+import os
+import tempfile
+
+
+def _calendar_nav_style():
+    up_path = os.path.join(tempfile.gettempdir(), "tdm_calendar_chevron_up.png")
+    down_path = os.path.join(tempfile.gettempdir(), "tdm_calendar_chevron_down.png")
+    qta.icon("mdi6.chevron-up", color=BLUE).pixmap(16, 16).save(up_path)
+    qta.icon("mdi6.chevron-down", color=BLUE).pixmap(16, 16).save(down_path)
+    up_path = up_path.replace("\\", "/")
+    down_path = down_path.replace("\\", "/")
+    return f"""
+            QCalendarWidget QToolButton#qt_calendar_monthbutton:hover,
+            QCalendarWidget QToolButton#qt_calendar_yearbutton:hover {{
+                background: #EAF3FF;
+                color: {BLUE};
+            }}
+            QCalendarWidget QMenu::item {{
+                color: {TEXT_CLR};
+                background: white;
+                padding: 6px 18px;
+            }}
+            QCalendarWidget QMenu::item:selected {{
+                background: #EAF3FF;
+                color: {BLUE};
+            }}
+            QCalendarWidget QSpinBox {{
+                padding-right: 22px;
+                min-width: 64px;
+            }}
+            QCalendarWidget QSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 20px;
+                height: 13px;
+                border: none;
+                background: transparent;
+            }}
+            QCalendarWidget QSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 20px;
+                height: 13px;
+                border: none;
+                background: transparent;
+            }}
+            QCalendarWidget QSpinBox::up-button:hover,
+            QCalendarWidget QSpinBox::down-button:hover {{
+                background: #EAF3FF;
+                border-radius: 5px;
+            }}
+            QCalendarWidget QSpinBox::up-arrow {{
+                image: url("{up_path}");
+                width: 14px;
+                height: 14px;
+            }}
+            QCalendarWidget QSpinBox::down-arrow {{
+                image: url("{down_path}");
+                width: 14px;
+                height: 14px;
+            }}
+    """
 
 
 # ─────────────────────────────────────────
@@ -850,6 +912,7 @@ class SmartDateEdit(QWidget):
                 color: {BLUE};
                 border-radius: 8px;
             }}
+            {_calendar_nav_style()}
         """)
         card.setGraphicsEffect(make_shadow(22, 8, 35))
         card_lay = QVBoxLayout(card)
@@ -1079,6 +1142,12 @@ class SmartDateTimeEdit(QWidget):
                 selection-color: white;
                 outline: 0;
             }}
+            QCalendarWidget QAbstractItemView::item:hover {{
+                background: #EAF3FF;
+                color: {BLUE};
+                border-radius: 8px;
+            }}
+            {_calendar_nav_style()}
         """)
         card.setGraphicsEffect(make_shadow(22, 8, 35))
         card_lay = QVBoxLayout(card)

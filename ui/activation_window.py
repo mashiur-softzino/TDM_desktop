@@ -256,6 +256,7 @@ class ActivationWindow(QDialog):
 
         self.worker = ActivationWorker(self.manager, key)
         self.worker.done.connect(self._on_done)
+        self.worker.finished.connect(self._on_worker_finished)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
 
@@ -268,9 +269,25 @@ class ActivationWindow(QDialog):
         else:
             self.status_label.setText(f"Error: {error}")
 
+    def _on_worker_finished(self):
+        if self.sender() is self.worker:
+            self.worker = None
+
     def closeEvent(self, event):
-        if self.worker and self.worker.isRunning():
-            self.worker.done.disconnect()
-            self.worker.quit()
-            self.worker.wait(2000)
+        worker = self.worker
+        if worker is not None:
+            try:
+                is_running = worker.isRunning()
+            except RuntimeError:
+                self.worker = None
+                is_running = False
+
+            if is_running:
+                try:
+                    worker.done.disconnect(self._on_done)
+                except (TypeError, RuntimeError):
+                    pass
+                worker.quit()
+                worker.wait(2000)
+                self.worker = None
         super().closeEvent(event)

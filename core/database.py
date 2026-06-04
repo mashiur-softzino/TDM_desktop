@@ -200,6 +200,28 @@ def _parse_duration_options(value, default_options: list) -> list:
         return list(default_options)
 
 
+def _ensure_column(conn, table: str, column: str, definition: str) -> None:
+    row = conn.execute(
+        """SELECT 1
+           FROM information_schema.columns
+           WHERE table_name = %s AND column_name = %s""",
+        (table, column),
+    ).fetchone()
+    if not row:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _ensure_lab_sample_columns(conn) -> None:
+    for table in ("records", "drafts"):
+        _ensure_column(conn, table, "lab_no", "TEXT")
+        _ensure_column(conn, table, "test", "TEXT")
+
+
+def _ensure_report_comment_columns(conn) -> None:
+    for table in ("records", "drafts"):
+        _ensure_column(conn, table, "report_comment", "TEXT")
+
+
 def init_db(default_duration_options: list | None = None):
     """Create tables if they don't exist.
 
@@ -251,11 +273,14 @@ def init_db(default_duration_options: list | None = None):
                 dose                   TEXT,
                 dose_dt                TEXT,
                 sample_collection_date TEXT,
+                lab_no                 TEXT,
+                test                   TEXT,
                 co_medications         TEXT,
                 scheme                 INTEGER,
                 trough                 TEXT,
                 prepared_by_id         INTEGER REFERENCES signatories(id),
-                checked_by_id          INTEGER REFERENCES signatories(id)
+                checked_by_id          INTEGER REFERENCES signatories(id),
+                report_comment         TEXT
             );
 
             CREATE TABLE IF NOT EXISTS sample_points (
@@ -316,14 +341,19 @@ def init_db(default_duration_options: list | None = None):
                 dose                   TEXT,
                 dose_dt                TEXT,
                 sample_collection_date TEXT,
+                lab_no                 TEXT,
+                test                   TEXT,
                 co_medications         TEXT,
                 scheme                 INTEGER,
                 trough                 TEXT,
                 phone                  TEXT,
                 prepared_by_id         INTEGER REFERENCES signatories(id),
-                checked_by_id          INTEGER REFERENCES signatories(id)
+                checked_by_id          INTEGER REFERENCES signatories(id),
+                report_comment         TEXT
             )
         """)
+        _ensure_lab_sample_columns(conn)
+        _ensure_report_comment_columns(conn)
         if default_duration_options is not None:
             conn.execute(
                 """INSERT INTO app_settings (key, value) VALUES ('duration_options', %s)
@@ -480,6 +510,8 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
         'dose':                   record['dose']                   or '',
         'dose_dt':                record['dose_dt']                or '',
         'sample_collection_date': record['sample_collection_date'] or '',
+        'lab_no':                 record['lab_no']                 or 'N/A',
+        'test':                   record['test']                   or 'Serum',
         'diag':                   record['diagnosis']              or 'N/A',
         'tx_date':                record['tx_date']                or '',
         'delivery_date':          record['delivery_date']          or '',
@@ -500,6 +532,7 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
         'trough':      record['trough'] or '',
         'prepared_by_id': record['prepared_by_id'],
         'checked_by_id':  record['checked_by_id'],
+        'report_comment': record.get('report_comment') or '',
         'times':          times,
         'concs':          concs,
     }
@@ -548,6 +581,8 @@ def _draft_row_to_snapshot(row) -> dict:
         'dose':                   row['dose']                   or '',
         'dose_dt':                row['dose_dt']                or '',
         'sample_collection_date': row['sample_collection_date'] or '',
+        'lab_no':                 row['lab_no']                 or 'N/A',
+        'test':                   row['test']                   or 'Serum',
         'diag':                   row['diagnosis']              or 'N/A',
         'tx_date':                row['tx_date']                or '',
         'delivery_date':          row['delivery_date']          or '',
@@ -567,6 +602,7 @@ def _draft_row_to_snapshot(row) -> dict:
         'trough':      row['trough'] or '',
         'prepared_by_id': row['prepared_by_id'],
         'checked_by_id':  row['checked_by_id'],
+        'report_comment': row.get('report_comment') or '',
         'times':          [],
         'concs':          [],
     }
@@ -595,6 +631,8 @@ def _draft_row_to_snapshot(row) -> dict:
 
 
 def _save_draft(conn, snapshot: dict):
+    _ensure_lab_sample_columns(conn)
+    _ensure_report_comment_columns(conn)
     patient = snapshot.get('patient', {})
     prepared_by_id = snapshot.get('prepared_by_id') or None
     checked_by_id  = snapshot.get('checked_by_id')  or None
@@ -622,12 +660,15 @@ def _save_draft(conn, snapshot: dict):
         patient.get('dose'),
         patient.get('dose_dt'),
         patient.get('sample_collection_date'),
+        patient.get('lab_no'),
+        patient.get('test') or 'Serum',
         patient.get('med'),
         snapshot.get('scheme'),
         snapshot.get('trough'),
         patient.get('phone'),
         prepared_by_id,
         checked_by_id,
+        snapshot.get('report_comment', ''),
     )
 
     draft_id = snapshot.get('id')
@@ -659,12 +700,15 @@ def _save_draft(conn, snapshot: dict):
                    dose                   = %s,
                    dose_dt                = %s,
                    sample_collection_date = %s,
+                   lab_no                 = %s,
+                   test                   = %s,
                    co_medications         = %s,
                    scheme                 = %s,
                    trough                 = %s,
                    phone                  = %s,
                    prepared_by_id         = %s,
-                   checked_by_id          = %s
+                   checked_by_id          = %s,
+                   report_comment         = %s
                WHERE id = %s""",
             params + (draft_id,),
         )
@@ -676,9 +720,9 @@ def _save_draft(conn, snapshot: dict):
                (saved_at, report_path, sampling_mode, direct_auc, sample_rows_json,
                 duration_options_json, times_json, concs_json, name, age, sex, invoice_date,
                 invoice_number, report_number, ref_by, diagnosis, tx_date, delivery_date,
-                drug, preparation, dose, dose_dt, sample_collection_date,
-                co_medications, scheme, trough, phone, prepared_by_id, checked_by_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                drug, preparation, dose, dose_dt, sample_collection_date, lab_no, test,
+                co_medications, scheme, trough, phone, prepared_by_id, checked_by_id, report_comment)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            RETURNING id""",
         params,
     )
@@ -700,6 +744,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
     checked_by_id  = snapshot.get('checked_by_id')  or None
 
     with _connect() as conn:
+        _ensure_lab_sample_columns(conn)
+        _ensure_report_comment_columns(conn)
         record_id = snapshot.get('id')
         patient_id = snapshot.get('patient_db_id')
         if patient_id is None and record_id is not None:
@@ -733,11 +779,14 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
             patient.get('dose'),
             patient.get('dose_dt'),
             patient.get('sample_collection_date'),
+            patient.get('lab_no'),
+            patient.get('test') or 'Serum',
             patient.get('med'),
             snapshot.get('scheme'),
             snapshot.get('trough'),
             prepared_by_id,
             checked_by_id,
+            snapshot.get('report_comment', ''),
         )
 
         record_id = snapshot.get('id')
@@ -759,11 +808,14 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                        dose                   = %s,
                        dose_dt                = %s,
                        sample_collection_date = %s,
+                       lab_no                 = %s,
+                       test                   = %s,
                        co_medications         = %s,
                        scheme                 = %s,
                        trough                 = %s,
                        prepared_by_id         = %s,
-                       checked_by_id          = %s
+                       checked_by_id          = %s,
+                       report_comment         = %s
                    WHERE id = %s""",
                 params + (record_id,),
             )
@@ -777,8 +829,8 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
                 """INSERT INTO records
                        (patient_id, record_type, saved_at, report_path, sampling_mode, direct_auc,
                         sample_rows_json, duration_options_json, drug, preparation, dose, dose_dt,
-                        sample_collection_date, co_medications, scheme, trough, prepared_by_id, checked_by_id)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        sample_collection_date, lab_no, test, co_medications, scheme, trough, prepared_by_id, checked_by_id, report_comment)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    RETURNING id""",
                 params,
             )
@@ -840,10 +892,12 @@ def delete_record(record_id: int):
 
 def load_all() -> tuple[list, list]:
     with _connect() as conn:
+        _ensure_lab_sample_columns(conn)
+        _ensure_report_comment_columns(conn)
         records = conn.execute("""
             SELECT r.id, r.patient_id, r.record_type, r.saved_at, r.report_path, r.sampling_mode, r.direct_auc, r.sample_rows_json, r.duration_options_json, r.drug, r.preparation,
-                   r.dose, r.dose_dt, r.sample_collection_date, r.co_medications,
-                   r.scheme, r.trough, r.prepared_by_id, r.checked_by_id,
+                   r.dose, r.dose_dt, r.sample_collection_date, r.lab_no, r.test, r.co_medications,
+                   r.scheme, r.trough, r.prepared_by_id, r.checked_by_id, r.report_comment,
                    p.pid, p.invoice_number, p.name, p.age, p.sex, p.invoice_date,
                    p.report_number, p.ref_by, p.diagnosis, p.tx_date, p.delivery_date, p.phone
             FROM   records r
@@ -871,7 +925,7 @@ def load_all() -> tuple[list, list]:
         draft_rows = conn.execute("""
             SELECT id, saved_at, report_path, sampling_mode, direct_auc, sample_rows_json, duration_options_json, times_json, concs_json,
                    name, age, sex, invoice_date, invoice_number, report_number, ref_by, diagnosis, tx_date, delivery_date,
-                    drug, preparation, dose, dose_dt, sample_collection_date, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id
+                    drug, preparation, dose, dose_dt, sample_collection_date, lab_no, test, co_medications, scheme, trough, phone, prepared_by_id, checked_by_id, report_comment
             FROM drafts
             ORDER BY saved_at ASC, id ASC
         """).fetchall()

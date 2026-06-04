@@ -1079,7 +1079,12 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.f_preparation.setText("Mycophenolate Mofetil")
         self.f_dose = field("e.g. 540 mg - 720 mg")
         self.f_dose.setMaxLength(50)
-        for edit in [self.f_preparation, self.f_dose]:
+        self.f_lab_no = field("Enter lab number")
+        self.f_lab_no.setMaxLength(50)
+        self.f_test = field("")
+        self.f_test.setText("Serum")
+        self.f_test.setMaxLength(50)
+        for edit in [self.f_preparation, self.f_dose, self.f_lab_no, self.f_test]:
             edit.textChanged.connect(self._on_data_changed)
         self.f_dose_dt = SmartDateTimeEdit()
         self.f_dose_dt.dateTimeChanged.connect(lambda *_: self._on_data_changed())
@@ -1159,11 +1164,13 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         meta_head.addStretch()
         meta_box_lay.addLayout(meta_head)
 
-        add_meta(0, 0, "Requested Drug", self.f_drug, required=True)
+        add_meta(0, 0, "Test Name", self.f_drug, required=True)
         add_meta(0, 1, "Requested Drug Preparation", self.f_preparation, required=True)
         add_meta(0, 2, "Dose of Requested Drug", self.f_dose, required=True)
         add_meta(0, 3, "Date & Time of Dose", self.f_dose_dt)
         add_meta(1, 0, "Sample Collection Date", self.f_sample_collection_date)
+        add_meta(1, 1, "Lab Number", self.f_lab_no)
+        add_meta(1, 2, "Sample", self.f_test)
         meta_box_lay.addLayout(meta_grid)
         card.body().addWidget(meta_box)
 

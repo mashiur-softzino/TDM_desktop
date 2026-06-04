@@ -332,9 +332,13 @@ class GradientCanvas(QWidget):
         self.ax.grid(True, linestyle='--', color='#EEEEEE', alpha=0.9)
         self.ax.spines['top'].set_visible(False)
         self.ax.spines['right'].set_visible(False)
-        self.ax.spines['left'].set_color(BORDER)
-        self.ax.spines['bottom'].set_color(BORDER)
-        self.ax.tick_params(colors='#9E9E9E', labelsize=10)
+        self.ax.spines['left'].set_color("#000000")
+        self.ax.spines['bottom'].set_color("#000000")
+        self.ax.spines['left'].set_linewidth(2.0)
+        self.ax.spines['bottom'].set_linewidth(2.0)
+        self.ax.tick_params(colors='#000000', labelsize=10)
+        for tick_label in self.ax.get_xticklabels() + self.ax.get_yticklabels():
+            tick_label.set_fontweight('bold')
         self.ax.text(0.5, 0.5, 'Enter concentrations to see the graph',
                      transform=self.ax.transAxes, ha='center', va='center',
                      color='#BDBDBD', fontsize=12)
@@ -356,8 +360,8 @@ class GradientCanvas(QWidget):
             title_size=13,
             label_size=11,
             tick_size=10,
-            axis_color=BORDER,
-            tick_color="#9E9E9E",
+            axis_color="#000000",
+            tick_color="#000000",
             title_color="#1A1A2E",
             red=RED,
         )

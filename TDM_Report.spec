@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets/tdm_logo.ico'],
+    icon=['assets\\tdm_logo.ico'],
 )
 coll = COLLECT(
     exe,

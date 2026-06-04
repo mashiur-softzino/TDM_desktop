@@ -16,16 +16,16 @@ from pathlib import Path
 from core.graph_utils import draw_concentration_time_graph
 
 
-def build_report_widget(patient, pk, interp, times, concs):
+def build_report_widget(patient, pk, interp, times, concs, report_comment=""):
     w = QWidget()
     w.setFixedWidth(680)
     lay = QVBoxLayout(w)
     lay.setContentsMargins(48, 40, 48, 40)
     lay.setSpacing(10)
 
-    def h(text, size=13, bold=True, align=Qt.AlignmentFlag.AlignLeft, color='#1A1A2E'):
+    def h(text, size=13, bold=True, align=Qt.AlignmentFlag.AlignLeft, color='#000000'):
         lbl = QLabel(text)
-        lbl.setFont(QFont("Arial", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
+        lbl.setFont(QFont("Calibri", size, QFont.Weight.Bold if bold else QFont.Weight.Normal))
         lbl.setAlignment(align)
         lbl.setStyleSheet(f"color: {color};")
         lay.addWidget(lbl)
@@ -33,13 +33,13 @@ def build_report_widget(patient, pk, interp, times, concs):
     def label_with_colon(label):
         return f"{str(label).rstrip(':').strip()} :"
 
-    def row(label, value, color='#1A1A2E'):
+    def row(label, value, color='#000000'):
         r = QHBoxLayout()
-        l = QLabel(f"<b>{label_with_colon(label)}</b>")
+        l = QLabel(label_with_colon(label))
         l.setFixedWidth(210)
-        l.setStyleSheet("color: #546E7A; font-size: 12px;")
+        l.setStyleSheet("color: #000000; font-size: 13px; font-family: Calibri;")
         v = QLabel(str(value))
-        v.setStyleSheet(f"font-size: 13px; color: {color};")
+        v.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {color}; font-family: Calibri;")
         r.addWidget(l); r.addWidget(v); r.addStretch()
         lay.addLayout(r)
 
@@ -48,26 +48,28 @@ def build_report_widget(patient, pk, interp, times, concs):
         f.setStyleSheet("background: #E8ECF0; max-height: 1px;")
         lay.addWidget(f)
 
-    h("THERAPEUTIC DRUG MONITORING REPORT", 15, align=Qt.AlignmentFlag.AlignCenter)
+    h("THERAPEUTIC DRUG MONITORING REPORT", 17, align=Qt.AlignmentFlag.AlignCenter)
     sep()
     lay.addSpacing(4)
 
-    h("Patient Details", 12)
+    h("Patient Details", 14)
+    row("Invoice Number:",  patient.get('invoice_number', 'N/A'))
+    row("Invoice Date:",    patient.get('invoice_date', 'N/A'))
+    row("Delivery Date:",   patient.get('delivery_date', 'N/A'))
+    row("Report Number:",   patient.get('report_number', 'N/A'))
     row("Patient Name:",    patient.get('name', 'N/A'))
     row("Age:",             f"{patient.get('age', 'N/A')} years")
     row("Gender:",          patient.get('sex', 'N/A'))
     row("Referred By:",     patient.get('ref_by', 'N/A'))
-    row("Invoice Number:",  patient.get('invoice_number', 'N/A'))
-    row("Invoice Date:",    patient.get('invoice_date', 'N/A'))
-    row("Report Number:",   patient.get('report_number', 'N/A'))
-    row("Delivery Date:",   patient.get('delivery_date', 'N/A'))
     row("Diagnosis:",       patient.get('diag', 'N/A'))
     row("Date of Transplant:", patient.get('tx_date', 'N/A'))
+    row("Sample:",          patient.get('test', 'Serum') or 'Serum')
+    row("Lab Number:",      patient.get('lab_no', 'N/A'))
+    row("Test Name:",       patient.get('drug', 'MPA') or 'MPA')
     row("Medications:",     patient.get('med', 'N/A'))
 
     lay.addSpacing(6); sep(); lay.addSpacing(4)
-    h("Drug & Sampling", 12)
-    row("Requested Drug:",            patient.get('drug', 'N/A'))
+    h("Drug & Sampling", 14)
     row("MPA Preparation:",           patient.get('preparation', 'N/A'))
     row("Dose of Requested Drug:",    patient.get('dose', 'N/A'))
     row("Date & Time of Dose:",          patient.get('dose_dt', 'N/A'))
@@ -76,7 +78,7 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Time of samples:", times_str)
 
     lay.addSpacing(6); sep(); lay.addSpacing(4)
-    h("Results", 12)
+    h("Results", 14)
 
     def fmt(v, d=3):
         return f"{v:.{d}f}" if v is not None else "N/A"
@@ -94,19 +96,22 @@ def build_report_widget(patient, pk, interp, times, concs):
     row("Interpretation:", interp, color=interp_color)
     row("Therapeutic Range (MPA):", "30–60 mg·h/L (AUC₀₋₁₂)")
 
+    if report_comment:
+        row("Comment:", report_comment)
+
     lay.addSpacing(6); sep()
     lay.addStretch()
 
     footer = QLabel(f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    footer.setStyleSheet("color: #9E9E9E; font-size: 10px;")
+    footer.setStyleSheet("color: #000000; font-size: 12px; font-family: Calibri;")
     lay.addWidget(footer)
 
     return w
 
 
 def build_report_html(patient, pk, interp, times, concs, prepared_by=None, checked_by=None,
-                      graph_uri=None, title="TDM Report", print_config=None):
+                      graph_uri=None, title="TDM Report", print_config=None, report_comment=""):
     def fmt(v, d=3):
         return f"{v:.{d}f}" if v is not None else "N/A"
 
@@ -198,33 +203,40 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     sections = [
         '<div class="report-shell">',
         '<div class="header-box">',
-        '<div class="header-top">CLINICAL PHARMACOLOGY UNIT</div>',
+        '<div class="header-top">Department of Biochemistry</div>',
         '</div>',
         '<div class="patient-box">',
         '<div class="meta-grid">',
         triple_row([
-            ("Patient Name", patient.get('name', 'N/A')),
-            ("Age (years)", patient.get('age', 'N/A')),
-            ("Gender", patient.get('sex', 'N/A')),
-        ]),
-        triple_row([
-            ("Referred By", patient.get('ref_by', 'N/A')),
             ("Invoice Number", patient.get('invoice_number', 'N/A')),
             ("Invoice Date", patient.get('invoice_date', 'N/A')),
+            ("Delivery Date", patient.get('delivery_date', 'N/A')),
         ]),
         triple_row([
             ("Report Number", patient.get('report_number', 'N/A')),
-            ("Delivery Date", patient.get('delivery_date', 'N/A')),
+            ("Patient Name", patient.get('name', 'N/A')),
+            ("Age (years)", patient.get('age', 'N/A')),
+        ]),
+        triple_row([
+            ("Gender", patient.get('sex', 'N/A')),
+            ("Referred By", patient.get('ref_by', 'N/A')),
         ]),
         '<div class="patient-divider"></div>',
-        detail_row("Date of Transplant", patient.get('tx_date', 'N/A'), "Diagnosis", patient.get('diag', 'N/A')),
+        triple_row([
+            ("Sample", patient.get('test', 'Serum') or 'Serum'),
+            ("Lab Number", patient.get('lab_no', 'N/A')),
+            ("Test Name", patient.get('drug', 'MPA') or 'MPA'),
+        ]),
+        triple_row([
+            ("Date of Transplant", patient.get('tx_date', 'N/A')),
+            ("Diagnosis", patient.get('diag', 'N/A')),
+        ]),
         f'<div class="single-row full-row patient-full-row compact-row"><span class="grid-label">{escape(label_with_colon("Medication"))}</span><span class="grid-value">{escape(str(patient.get("med", "N/A")))}</span></div>',
         '</div>',
         '</div>',
-        '<div class="section-block">',
+        '<div class="section-block drug-section">',
         '<div class="section-title">Drug &amp; Sampling</div>',
-        detail_row("Requested Drug", patient.get('drug', 'N/A'), "Requested Drug Preparation", patient.get('preparation', 'N/A')),
-        detail_row("Dose of Requested Drug", patient.get('dose', 'N/A')),
+        detail_row("Requested Drug Preparation", patient.get('preparation', 'N/A'), "Dose of Requested Drug", patient.get('dose', 'N/A')),
         detail_row(
             "Date and Time of Dose",
             patient.get('dose_dt', 'N/A'),
@@ -267,12 +279,16 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
     if graph_uri:
         sections.append(f'<div class="graph-wrap"><img src="{graph_uri}" alt="Concentration Time Graph"></div>')
     sections += [
-        f'<div class="range-note"><strong>{escape(label_with_colon("Therapeutic Range"))}</strong> At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</div>',
-        '</div>', # end section-block
+        f'<div class="range-note"><span class="note-label">{escape(label_with_colon("Therapeutic Range"))}</span> <span class="note-value">At present the literature aims at an AUC for MPA of 30 - 60 mg.h/L as being effective with less side effects.</span></div>',
     ]
+    if report_comment:
+        sections.append(
+            f'<div class="report-comment"><span class="note-label">{escape(label_with_colon("Comment"))}</span> <span class="note-value">{escape(str(report_comment))}</span></div>'
+        )
+    sections.append('</div>') # end section-block
 
     # Signature Section
-    sig_html = '<div class="signature-container">'
+    sig_html = '<div class="signature-footer"><div class="signature-container">'
     for i, (label, doctor) in enumerate([("Prepared By", prepared_by), ("Checked By", checked_by)]):
         box_class = "sig-box sig-box-right" if i == 1 else "sig-box"
         sig_html += f'<div class="{box_class}">'
@@ -297,11 +313,10 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
             sig_html += '<div class="doc-name">................................</div>'
             sig_html += f'<div class="doc-desc" style="color:#888;">{escape(label)}</div>'
         sig_html += '</div>'
-    sig_html += '</div>'
+    sig_html += f'</div><div class="footer">Generated: {escape(generated)}</div></div>'
     sections.append(sig_html)
 
     sections += [
-        f'<div class="footer">Generated: {escape(generated)}</div>',
         '</div>', # end report-shell
     ]
 
@@ -322,56 +337,63 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
   <meta charset="utf-8">
   <title>{escape(title)}</title>
   <style>
-    body {{ font-family: "Times New Roman", Georgia, serif; color:#111; margin:0; background:white; }}
-    .page {{ width:860px; margin:0 auto; padding:28px 32px 28px; }}
-    .report-shell {{ padding:0; }}
+    body {{ font-family: Calibri, "Segoe UI", Arial, sans-serif; color:#000; margin:0; background:white; }}
+    .page {{ width:860px; min-height:100vh; margin:0 auto; padding:28px 32px 28px; box-sizing:border-box; display:flex; flex-direction:column; }}
+    .report-shell {{ padding:0; width:100%; flex:1; display:flex; flex-direction:column; }}
     .header-box {{ margin-bottom:12px; }}
-    .header-top {{ text-align:center; font-size:20px; font-weight:700; letter-spacing:.2px; }}
-    .header-subline {{ text-align:left; font-size:14px; font-weight:700; margin-top:12px; }}
+    .header-top {{ text-align:center; font-size:23px; font-weight:700; letter-spacing:0; }}
+    .header-subline {{ text-align:left; font-size:16px; font-weight:700; margin-top:12px; }}
     .patient-box {{ border:2px solid #111; border-radius:14px; padding:12px 16px 12px; margin-bottom:14px; }}
     .section-block {{ margin-top:10px; }}
     .meta-grid {{ display:flex; flex-direction:column; gap:3px; }}
-    .triple-row {{ display:grid; grid-template-columns: 1.2fr 1fr 1fr; gap:12px; line-height:1.22; font-size:12px; }}
+    .triple-row {{ display:grid; grid-template-columns: 1.2fr 1fr 1fr; gap:12px; line-height:1.25; font-size:14px; }}
     .triple-col {{ display:flex; gap:6px; align-items:flex-start; min-width:0; }}
     .grid-pair {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }}
-    .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.22; font-size:12px; }}
-    .grid-label {{ width:auto; font-weight:700; white-space:nowrap; }}
-    .grid-value {{ flex:1; }}
+    .grid-row, .single-row {{ display:flex; gap:8px; align-items:flex-start; line-height:1.25; font-size:14px; }}
+    .grid-label {{ width:auto; font-weight:400; white-space:nowrap; }}
+    .grid-value {{ flex:1; font-weight:700; }}
     .patient-divider {{ border-top:1px solid #111; margin:5px 0 4px; }}
     .single-row {{ margin-top:6px; }}
     .compact-row {{ margin-top:0; }}
     .full-row .grid-value {{ white-space: nowrap; }}
     .patient-full-row .grid-value {{ white-space: normal; }}
-    .section-title {{ font-size:12px; font-weight:700; margin:12px 0 6px; }}
+    .section-title {{ font-size:15px; font-weight:700; margin:12px 0 6px; }}
+    .drug-section {{ margin-top:0; }}
+    .drug-section .section-title {{ margin-top:2px; }}
     .result-title {{ margin-top:8px; }}
     .result-line {{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin:2px 0; align-items:start; }}
-    .result-col {{ display:flex; align-items:flex-start; gap:4px; font-size:12px; white-space:nowrap; }}
-    .r-label {{ font-weight:700; white-space:nowrap; }}
+    .result-col {{ display:flex; align-items:flex-start; gap:4px; font-size:14px; white-space:nowrap; }}
+    .r-label {{ font-weight:400; white-space:nowrap; }}
     .r-value {{ font-weight:700; white-space:nowrap; }}
     .result-line-interpretation {{ margin-top:0; }}
-    .result-interpretation {{ font-size:12px; }}
+    .result-interpretation {{ font-size:14px; }}
     .graph-wrap {{ margin:10px auto 8px; text-align:center; border-top:1px solid #DDD; padding-top:8px; }}
     .graph-wrap img {{ display:block; width:720px; max-width:100%; height:auto; max-height:235px; object-fit:contain; margin:0 auto; }}
-    .range-note {{ margin-top:12px; font-size:12px; line-height:1.4; }}
+    .range-note {{ margin-top:12px; font-size:14px; line-height:1.4; }}
+    .report-comment {{ margin-top:6px; font-size:14px; line-height:1.4; }}
+    .note-label {{ font-weight:400; }}
+    .note-value {{ font-weight:700; }}
     
-    .signature-container {{ margin-top:16px; display:flex; justify-content:space-between; padding:0 10px; }}
+    .signature-footer {{ margin-top:auto; padding-top:26px; background:white; }}
+    .signature-container {{ display:flex; justify-content:space-between; padding:0 10px; }}
     .sig-box {{ text-align:left; width:46%; display:flex; flex-direction:column; align-items:flex-start; }}
     .sig-box-right {{ text-align:right; align-items:flex-end; }}
     .sig-img-wrap {{ height:55px; display:flex; align-items:flex-end; justify-content:flex-start; margin-bottom:4px; }}
     .sig-img-wrap img {{ max-height:55px; max-width:220px; object-fit:contain; }}
-    .doc-name {{ font-weight:700; font-size:13px; margin-bottom:2px; color:#000; line-height:1.2; }}
-    .doc-desc {{ font-size:12px; color:#111; line-height:1.35; }}
+    .doc-name {{ font-weight:700; font-size:15px; margin-bottom:2px; color:#000; line-height:1.2; }}
+    .doc-desc {{ font-size:13px; color:#000; line-height:1.35; }}
     
-    .footer {{ margin-top:20px; text-align:center; color:#555; font-size:11px; border-top:1px solid #EEE; padding-top:8px; }}
+    .footer {{ margin-top:8px; text-align:center; color:#000; font-size:12px; border-top:1px solid #111; padding-top:6px; }}
     @media print {{
       body {{ margin:0; }}
-      .page {{ width:auto; margin:0; padding:{print_top_padding} 12px 12px; }}
+      .page {{ width:auto; min-height:100vh; margin:0; padding:{print_top_padding} 12px 12px; }}
       .patient-box {{ border-width:1.5px; }}
       .result-line {{ grid-template-columns: 1fr 1fr; gap:12px; }}
       .result-col {{ display:flex; gap:4px; }}
       .r-label, .r-value {{ white-space:nowrap; }}
       .graph-wrap {{ margin:8px auto 8px; padding-top:8px; }}
       .graph-wrap img {{ width:720px; max-height:220px; }}
+      .signature-footer {{ margin-top:auto; padding-top:22px; }}
     }}
   </style>
 </head>

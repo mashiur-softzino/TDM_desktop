@@ -64,6 +64,8 @@ class TDMWorkflowMixin:
             "dose": self.f_dose.text().strip(),
             "dose_dt": self.f_dose_dt.dateTime().toString("dd.MM.yyyy 'at' hh:mmAP"),
             "sample_collection_date": d_sam.toString("dd.MM.yyyy") if d_sam else "N/A",
+            "lab_no": self.f_lab_no.text().strip() or "N/A",
+            "test": self.f_test.text().strip() or "Serum",
             "diag": self.f_diag.text().strip() or "N/A",
             "tx_date": d_tx.toString("dd.MM.yyyy") if d_tx else "N/A",
             "med": self.f_med.get_text() or "N/A",
@@ -103,6 +105,7 @@ class TDMWorkflowMixin:
             "concs": concs,
             "prepared_by_id": self.prep_by_combo.currentData(),
             "checked_by_id": self.checked_by_combo.currentData(),
+            "report_comment": self._current_report_comment(),
         }
         if hasattr(self, "_last_pk"):
             data["pk"] = self._last_pk
@@ -332,8 +335,10 @@ class TDMWorkflowMixin:
         self.f_sex.setCurrentIndex(sex_index if sex_index >= 0 else 0)
         self.f_diag.setText(patient.get("diag", "Post Renal Transplant") if patient.get("diag") != "N/A" else "Post Renal Transplant")
         self.f_drug.setText(patient.get("drug", "MPA") or "MPA")
-        self.f_preparation.setText(patient.get("preparation", "Mycophenolate Mofetil (MMF)"))
+        self.f_preparation.setText(patient.get("preparation", "Mycophenolate Mofetil"))
         self.f_dose.setText(patient.get("dose", "540mg - 720mg") if patient.get("dose") != "N/A" else "")
+        self.f_lab_no.setText(patient.get("lab_no", "") if patient.get("lab_no") != "N/A" else "")
+        self.f_test.setText(patient.get("test", "Serum") if patient.get("test") != "N/A" else "Serum")
         tx_date = QDate.fromString(patient.get("tx_date", ""), "dd.MM.yyyy")
         self.f_tx_date.setDate(tx_date if tx_date.isValid() else None)
         dose_dt_text = patient.get("dose_dt", "")
@@ -388,8 +393,9 @@ class TDMWorkflowMixin:
             self._last_concs = snapshot.get("concs", [])
             self._last_interp = snapshot.get("interp", "N/A")
             self._last_drug = canonical_drug_name(patient.get("drug", "MPA"))
+            self._last_report_comment = snapshot.get("report_comment", "")
         else:
-            for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug"]:
+            for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug", "_last_report_comment"]:
                 if hasattr(self, attr):
                     delattr(self, attr)
         self._loaded_form_signature = self._form_signature()
@@ -447,6 +453,7 @@ class TDMWorkflowMixin:
         self._last_concs = snapshot.get("concs", [])
         self._last_interp = snapshot.get("interp", "N/A")
         self._last_drug = canonical_drug_name(snapshot.get("patient", {}).get("drug", "MPA"))
+        self._last_report_comment = snapshot.get("report_comment", "")
         self._apply_results(pk, self._last_interp)
 
     def _report_file_stem(self, snapshot):
@@ -484,6 +491,7 @@ class TDMWorkflowMixin:
                 graph_uri=None,
                 title=self._report_file_stem(snapshot),
                 print_config=load_report_print_config(),
+                report_comment=snapshot.get("report_comment", ""),
             )
             report_path.write_text(html, encoding="utf-8")
             snapshot["report_path"] = str(report_path)
@@ -502,6 +510,7 @@ class TDMWorkflowMixin:
         if not pk:
             QMessageBox.information(self, "No Report Yet", "Generate a report for this sample first.")
             return
+        snapshot["report_comment"] = self._current_report_comment(snapshot.get("report_comment", ""))
         report_path = snapshot.get("report_path")
         expected_path = self._expected_report_path(snapshot)
         from reports.report_print import build_report_html
@@ -521,6 +530,7 @@ class TDMWorkflowMixin:
             graph_uri=None,
             title=self._report_file_stem(snapshot),
             print_config=load_report_print_config(),
+            report_comment=snapshot.get("report_comment", ""),
         )
         report_path = str(expected_path)
         snapshot["report_path"] = report_path
@@ -536,13 +546,43 @@ class TDMWorkflowMixin:
         else:
             self._show_toast("Error", "Report file not found and could not be regenerated.", tone="error")
 
+    def _current_report_comment(self, fallback=None):
+        if self._results_dialog is not None:
+            comment = self._results_dialog.get_report_comment()
+            if comment:
+                return comment
+        if fallback is not None:
+            return fallback
+        if hasattr(self, "_last_report_comment"):
+            return self._last_report_comment
+        return ""
+
+    def _save_result_comment(self, comment):
+        self._last_report_comment = comment
+        snapshot = getattr(self, "_report_snapshot", None)
+        if snapshot is None:
+            return
+        snapshot["report_comment"] = comment
+        if snapshot.get("id"):
+            try:
+                save_record(snapshot, snapshot.get("record_type", "sample"))
+                self._save_report_file(snapshot)
+                self._load_saved_patients()
+                self._refresh_patients_list()
+            except Exception as exc:
+                log_error("_save_result_comment", exc)
+                if self._results_dialog is not None:
+                    self._results_dialog.show_toast("Save failed", "Report comment could not be saved.", tone="warning")
+
     def _apply_results(self, pk, interp):
         if self._results_dialog is None:
             self._results_dialog = ResultsDialog(self, print_handler=self._print_report)
+            self._results_dialog.comment_saved.connect(self._save_result_comment)
             self._results_dialog.finished.connect(self._on_results_dialog_closed)
         times = getattr(self, "_last_times", None)
         concs = getattr(self, "_last_concs", None)
         self._results_dialog.apply_results(pk, interp, times=times, concs=concs)
+        self._results_dialog.set_report_comment(getattr(self, "_last_report_comment", ""))
         has_data = bool(times and concs)
         self._results_dialog.set_graph_visible(has_data)
         self._results_dialog.show()
@@ -580,6 +620,7 @@ class TDMWorkflowMixin:
 
     def _persist_generated_report(self, snapshot, existing_id, active_source, form_signature, was_updating=False, show_result_toast=False):
         try:
+            snapshot["report_comment"] = self._current_report_comment()
             if active_source == "sample" and existing_id is not None:
                 snapshot["id"] = existing_id
             if active_source == "draft" and existing_id:
@@ -612,7 +653,7 @@ class TDMWorkflowMixin:
         self._clear_form_state(close_results=False)
         if hasattr(self, "_report_snapshot"):
             delattr(self, "_report_snapshot")
-        for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug"]:
+        for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug", "_last_report_comment"]:
             if hasattr(self, attr):
                 delattr(self, attr)
         self._switch_page(1)
@@ -657,6 +698,7 @@ class TDMWorkflowMixin:
             self._last_concs = []
             self._last_interp = interp
             self._last_drug = drug
+            self._last_report_comment = ""
             patient = self._patient_payload()
             log_report_generated(patient.get("pid", "N/A"), patient.get("name", "N/A"), drug, auc_val)
             self._apply_results(pk, interp)
@@ -698,6 +740,7 @@ class TDMWorkflowMixin:
         self._last_concs = concs
         self._last_interp = interp
         self._last_drug = drug
+        self._last_report_comment = ""
         patient = self._patient_payload()
         log_report_generated(patient.get("pid", "N/A"), patient.get("name", "N/A"), drug, pk.get("auc_0_12"))
         self._apply_results(pk, interp)
@@ -758,13 +801,15 @@ class TDMWorkflowMixin:
             self.f_report_no,
             self.f_referred_by,
             self.f_dose,
+            self.f_lab_no,
             self.f_diag,
             self.trough_edit,
             self.f_phone,
         ]:
             edit.clear()
         self.f_drug.setText("MPA")
-        self.f_preparation.setText("Mycophenolate Mofetil (MMF)")
+        self.f_preparation.setText("Mycophenolate Mofetil")
+        self.f_test.setText("Serum")
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
@@ -782,7 +827,7 @@ class TDMWorkflowMixin:
         if close_results and self._results_dialog is not None:
             self._results_dialog.close()
         if close_results:
-            for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug"]:
+            for attr in ["_last_pk", "_last_times", "_last_concs", "_last_interp", "_last_drug", "_last_report_comment"]:
                 if hasattr(self, attr):
                     delattr(self, attr)
 

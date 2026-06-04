@@ -41,6 +41,10 @@ CLOCK_VERIFICATION_ERROR = (
 PASETO_HEADER = b"v4.public."
 TRUSTED_SIGNING_KID = "signing-3c752a2ed5695e1638c7d10388ce0141"
 TRUSTED_SIGNING_PUBLIC_KEY_B64 = "yx7HzRe5pNW9K80fQPv0oDjz/zUYkbf9MHumR2z1VQE="
+TRUSTED_SIGNING_KEYS = {
+    TRUSTED_SIGNING_KID: TRUSTED_SIGNING_PUBLIC_KEY_B64,
+    "jibonsheba-signing-key": "bGL4qdkPuCffqv+7g4IRdpV+S2GWWX9b3n0UM6CODE4=",
+}
 EXPECTED_ISSUER = "laravel-licensing"
 TOKEN_VERIFY_ERROR = (
     "Secure license verification is unavailable. Install dependencies with "
@@ -710,15 +714,16 @@ class LicenseManager:
             self._last_error = "Invalid license token payload"
             return None
 
-        if payload.get("kid") != TRUSTED_SIGNING_KID:
-            self._last_error = "Untrusted license signer"
+        payload_kid = payload.get("kid")
+        if payload_kid not in TRUSTED_SIGNING_KEYS:
+            self._last_error = f"Untrusted license signer: {payload_kid or 'missing kid'}"
             return None
         if payload.get("iss") != EXPECTED_ISSUER:
             self._last_error = "Unexpected license issuer"
             return None
 
         try:
-            verify_key = VerifyKey(base64.b64decode(TRUSTED_SIGNING_PUBLIC_KEY_B64))
+            verify_key = VerifyKey(base64.b64decode(TRUSTED_SIGNING_KEYS[payload_kid]))
             verify_key.verify(
                 pae(
                     [
@@ -758,7 +763,7 @@ class LicenseManager:
         # The footer is still included in the verified signed message, but we also
         # sanity-check the advertised key id so the cached token metadata stays coherent.
         footer_kid = footer.get("kid")
-        if footer_kid and footer_kid != TRUSTED_SIGNING_KID:
+        if footer_kid and footer_kid != payload_kid:
             self._last_error = "License footer key mismatch"
             return None
 
