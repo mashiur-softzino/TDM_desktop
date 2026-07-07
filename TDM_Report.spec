@@ -1,12 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_submodules
+
+binaries = []
+hiddenimports = [
+    'nacl',
+    'nacl.signing',
+    'nacl.exceptions',
+    'nacl.bindings',
+    'cffi',
+    '_cffi_backend',
+    'pycparser',
+]
+binaries += collect_dynamic_libs('nacl')
+binaries += collect_dynamic_libs('cffi')
+hiddenimports += collect_submodules('nacl')
+hiddenimports += collect_submodules('cffi')
+hiddenimports += collect_submodules('pycparser')
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=[('assets', 'assets'), ('seed_signatories.json', '.')],
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

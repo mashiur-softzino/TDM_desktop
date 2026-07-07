@@ -60,7 +60,7 @@ def _start_report_renderer_warmup():
                     "dose_dt": "N/A",
                     "sample_collection_date": "N/A",
                     "lab_no": "N/A",
-                    "test": "Serum",
+                    "test": "Plasma",
                 },
                 pk={
                     "auc_0_last": 30.0,

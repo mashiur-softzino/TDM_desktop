@@ -63,7 +63,7 @@ def build_report_widget(patient, pk, interp, times, concs, report_comment=""):
     row("Referred By:",     patient.get('ref_by', 'N/A'))
     row("Diagnosis:",       patient.get('diag', 'N/A'))
     row("Date of Transplant:", patient.get('tx_date', 'N/A'))
-    row("Sample:",          patient.get('test', 'Serum') or 'Serum')
+    row("Sample:",          patient.get('test', 'Plasma') or 'Plasma')
     row("Lab Number:",      patient.get('lab_no', 'N/A'))
     row("Test Name:",       patient.get('drug', 'MPA') or 'MPA')
     row("Medications:",     patient.get('med', 'N/A'))
@@ -72,7 +72,7 @@ def build_report_widget(patient, pk, interp, times, concs, report_comment=""):
     h("Drug & Sampling", 14)
     row("MPA Preparation:",           patient.get('preparation', 'N/A'))
     row("Dose of Requested Drug:",    patient.get('dose', 'N/A'))
-    row("Date & Time of Dose:",          patient.get('dose_dt', 'N/A'))
+    row("Date & Time of Last Dose:",     patient.get('dose_dt', 'N/A'))
     row("Sample Collection Date:",    patient.get('sample_collection_date', 'N/A'))
     times_str = "Trough, " + ", ".join(str(t) for t in times[1:]) + " hours post dose." if len(times) > 1 else "Trough"
     row("Time of samples:", times_str)
@@ -223,7 +223,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         ]),
         '<div class="patient-divider"></div>',
         triple_row([
-            ("Sample", patient.get('test', 'Serum') or 'Serum'),
+            ("Sample", patient.get('test', 'Plasma') or 'Plasma'),
             ("Lab Number", patient.get('lab_no', 'N/A')),
             ("Test Name", patient.get('drug', 'MPA') or 'MPA'),
         ]),
@@ -238,7 +238,7 @@ def build_report_html(patient, pk, interp, times, concs, prepared_by=None, check
         '<div class="section-title">Drug &amp; Sampling</div>',
         detail_row("Requested Drug Preparation", patient.get('preparation', 'N/A'), "Dose of Requested Drug", patient.get('dose', 'N/A')),
         detail_row(
-            "Date and Time of Dose",
+            "Date & Time of Last Dose",
             patient.get('dose_dt', 'N/A'),
             "Date of Sample Collection",
             patient.get('sample_collection_date', 'N/A'),

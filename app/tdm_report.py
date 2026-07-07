@@ -1082,7 +1082,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         self.f_lab_no = field("Enter lab number")
         self.f_lab_no.setMaxLength(50)
         self.f_test = field("")
-        self.f_test.setText("Serum")
+        self.f_test.setText("Plasma")
         self.f_test.setMaxLength(50)
         for edit in [self.f_preparation, self.f_dose, self.f_lab_no, self.f_test]:
             edit.textChanged.connect(self._on_data_changed)
@@ -1167,7 +1167,7 @@ class TDMMainWindow(TDMWorkflowMixin, QMainWindow):
         add_meta(0, 0, "Test Name", self.f_drug, required=True)
         add_meta(0, 1, "Requested Drug Preparation", self.f_preparation, required=True)
         add_meta(0, 2, "Dose of Requested Drug", self.f_dose, required=True)
-        add_meta(0, 3, "Date & Time of Dose", self.f_dose_dt)
+        add_meta(0, 3, "Date & Time of Last Dose", self.f_dose_dt)
         add_meta(1, 0, "Sample Collection Date", self.f_sample_collection_date)
         add_meta(1, 1, "Lab Number", self.f_lab_no)
         add_meta(1, 2, "Sample", self.f_test)

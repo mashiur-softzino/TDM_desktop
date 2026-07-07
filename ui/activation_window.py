@@ -29,10 +29,6 @@ class ActivationWorker(QThread):
         self.license_key = license_key
 
     def run(self):
-        ok, err = self.manager.verify_key(self.license_key)
-        if not ok:
-            self.done.emit(False, err)
-            return
         ok, err = self.manager.activate(self.license_key)
         self.done.emit(ok, err)
 

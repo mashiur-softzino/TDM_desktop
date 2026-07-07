@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover - handled gracefully at runtime
     BadSignatureError = Exception
     VerifyKey = None
 
-BASE_URL = "https://dev-license.softzino.com/api/v1/license"
+BASE_URL = "https://license.softzino.com/api/v1"
 LICENSE_FILE = license_file()
 migrate_legacy_file("license.json", LICENSE_FILE)
 HEARTBEAT_INTERVAL = 300  # 5 minutes
@@ -39,11 +39,15 @@ CLOCK_VERIFICATION_ERROR = (
 )
 
 PASETO_HEADER = b"v4.public."
+TRUSTED_ROOT_KID = "root_sVRUTUxtWYKFGA5Yt87caPSikGdjRSSs"
+TRUSTED_ROOT_PUBLIC_KEY_B64 = "6LJQlpa/pnadeDCifVw7cnBNhnlIkQrl62p/9EUnJtc="
 TRUSTED_SIGNING_KID = "signing-3c752a2ed5695e1638c7d10388ce0141"
 TRUSTED_SIGNING_PUBLIC_KEY_B64 = "yx7HzRe5pNW9K80fQPv0oDjz/zUYkbf9MHumR2z1VQE="
 TRUSTED_SIGNING_KEYS = {
     TRUSTED_SIGNING_KID: TRUSTED_SIGNING_PUBLIC_KEY_B64,
     "jibonsheba-signing-key": "bGL4qdkPuCffqv+7g4IRdpV+S2GWWX9b3n0UM6CODE4=",
+    "signing-f61462c1e919e22ee153f1d6be8818db": "S9MO3TGnmXyjVhUgNM3QMD+hoMgHnpXRM4iz+Quj3h4=",
+    "oishy-test-20260619162330": "S9MO3TGnmXyjVhUgNM3QMD+hoMgHnpXRM4iz+Quj3h4=",
 }
 EXPECTED_ISSUER = "laravel-licensing"
 TOKEN_VERIFY_ERROR = (
@@ -89,6 +93,10 @@ def is_license_expired_local(expires_at: str | None) -> bool:
     if exp is None:
         return False
     return datetime.now().astimezone() > exp
+
+
+def is_usable_license_status(status: str | None) -> bool:
+    return str(status or "").lower() in {"active", "grace"}
 
 
 def extract_server_time(
@@ -140,6 +148,10 @@ def pae(parts: list[bytes]) -> bytes:
     return output
 
 
+def php_json_bytes(value: dict) -> bytes:
+    return json.dumps(value, separators=(",", ":")).replace("/", "\\/").encode()
+
+
 def error_message_from_response(data: dict, default: str) -> str:
     message = data.get("message")
     if isinstance(message, str) and message.strip():
@@ -157,6 +169,15 @@ def error_message_from_response(data: dict, default: str) -> str:
                 first = value[0]
                 if isinstance(first, str) and first.strip():
                     return first
+        details = err.get("details")
+        if isinstance(details, dict):
+            for value in details.values():
+                if isinstance(value, list) and value:
+                    first = value[0]
+                    if isinstance(first, str) and first.strip():
+                        return first
+                if isinstance(value, str) and value.strip():
+                    return value
 
     errors = data.get("errors")
     if isinstance(errors, dict):
@@ -201,8 +222,8 @@ class LicenseManager:
         """
         try:
             resp = requests.post(
-                f"{BASE_URL}/verify",
-                json={"license_key": license_key},
+                f"{BASE_URL}/validate",
+                json={"license_key": license_key, "fingerprint": get_fingerprint()},
                 timeout=10,
             )
             data = resp.json()
@@ -239,21 +260,20 @@ class LicenseManager:
                 json={
                     "license_key": license_key,
                     "fingerprint": fingerprint,
-                    "client_type": "desktop-app",
+                    "metadata": {
+                        "client_type": "desktop-app",
+                        "os": platform.platform(),
+                    },
                 },
                 timeout=10,
             )
             data = resp.json()
             if resp.status_code in (200, 201) and data.get("success"):
                 inner = data.get("data", {})
-                token = inner.get("token")
-                if not token:
-                    return False, "Activation failed: missing token"
-
-                claims = self._verify_token(token, license_key)
+                claims = self._claims_from_token_response(inner, license_key)
                 if claims is None:
                     return False, self._last_error or "Activation failed"
-                if claims.get("status") != "active":
+                if not is_usable_license_status(claims.get("status")):
                     return False, "License is not active"
                 if is_license_expired_local(claims.get("license_expires_at")):
                     return False, "License has expired"
@@ -267,8 +287,9 @@ class LicenseManager:
                 self._save(
                     license_key,
                     fingerprint,
-                    token,
+                    inner.get("token"),
                     claims,
+                    token_response=inner,
                     trusted_now=trusted_now,
                 )
                 self._start_heartbeat()
@@ -342,7 +363,7 @@ class LicenseManager:
         claims = self._verified_token_claims()
         if claims is None:
             return False
-        if claims.get("status") != "active":
+        if not is_usable_license_status(claims.get("status")):
             return False
         if not self._validate_clock_checkpoint(update=True):
             return False
@@ -357,10 +378,12 @@ class LicenseManager:
         fingerprint: str,
         token: str,
         claims: dict,
+        token_response: dict | None = None,
         trusted_now: datetime | None = None,
     ):
         with self._lock:
             now = datetime.now().astimezone()
+            token_response = token_response or {}
             trusted_now_iso = (
                 trusted_now.isoformat()
                 if trusted_now
@@ -382,6 +405,11 @@ class LicenseManager:
                     claims.get("license_expires_at")
                 ),
                 "token": token,
+                "token_expires_at": token_response.get("token_expires_at"),
+                "refresh_after": token_response.get("refresh_after"),
+                "force_online_after": token_response.get("force_online_after"),
+                "public_key_bundle": token_response.get("public_key_bundle")
+                or self._data.get("public_key_bundle"),
             }
             self._reset_session_clock_baseline(now)
             self._persist()
@@ -465,6 +493,19 @@ class LicenseManager:
     def _try_online_recovery(self) -> bool:
         return self._refresh_saved_token(require_trusted_clock=True)
 
+    def _claims_from_token_response(
+        self, token_response: dict, license_key: str | None
+    ) -> dict | None:
+        token = token_response.get("token")
+        if not token:
+            self._last_error = "Activation failed: missing token"
+            return None
+        return self._verify_token(
+            token,
+            license_key,
+            key_bundle=token_response.get("public_key_bundle"),
+        )
+
     def _refresh_saved_token(self, require_trusted_clock: bool = False) -> bool:
         with self._lock:
             lk = self._data.get("license_key")
@@ -473,16 +514,14 @@ class LicenseManager:
             return False
         try:
             resp = requests.post(
-                f"{BASE_URL}/token/refresh",
+                f"{BASE_URL}/refresh",
                 json={"license_key": lk, "fingerprint": fp},
                 timeout=10,
             )
             data = resp.json()
             if resp.status_code == 200 and data.get("success"):
-                token = data.get("data", {}).get("token")
-                if not token:
-                    return False
-                claims = self._verify_token(token, lk)
+                inner = data.get("data", {})
+                claims = self._claims_from_token_response(inner, lk)
                 if claims is None:
                     return False
                 trusted_now = extract_server_time(data, resp)
@@ -499,8 +538,9 @@ class LicenseManager:
                 self._save(
                     lk,
                     fp,
-                    token,
+                    inner.get("token"),
                     claims,
+                    token_response=inner,
                     trusted_now=trusted_now,
                 )
                 return True
@@ -677,9 +717,103 @@ class LicenseManager:
         if not token:
             self._last_error = "Missing license token"
             return None
-        return self._verify_token(token, license_key)
+        return self._verify_token(
+            token,
+            license_key,
+            key_bundle=self._data.get("public_key_bundle"),
+        )
 
-    def _verify_token(self, token: str, license_key: str | None) -> dict | None:
+    def _trusted_signing_key_from_bundle(
+        self, key_bundle: dict | None, payload_kid: str | None
+    ) -> str | None:
+        if not isinstance(key_bundle, dict) or not payload_kid:
+            return None
+
+        root = key_bundle.get("root")
+        if not isinstance(root, dict):
+            return None
+        if root.get("kid") != TRUSTED_ROOT_KID:
+            self._last_error = "Untrusted license root key"
+            return None
+        if root.get("public_key") != TRUSTED_ROOT_PUBLIC_KEY_B64:
+            self._last_error = "License root key mismatch"
+            return None
+
+        candidates = []
+        signing = key_bundle.get("signing")
+        if isinstance(signing, dict):
+            candidates.append(signing)
+        signing_keys = key_bundle.get("signing_keys")
+        if isinstance(signing_keys, list):
+            candidates.extend(item for item in signing_keys if isinstance(item, dict))
+
+        for signing_key in candidates:
+            if signing_key.get("kid") != payload_kid:
+                continue
+            if self._verify_signing_certificate(signing_key, root):
+                return signing_key.get("public_key")
+            return None
+        return None
+
+    def _verify_signing_certificate(self, signing_key: dict, root: dict) -> bool:
+        certificate_raw = signing_key.get("certificate")
+        if not certificate_raw:
+            self._last_error = "License signing certificate is missing"
+            return False
+        try:
+            certificate_doc = (
+                json.loads(certificate_raw)
+                if isinstance(certificate_raw, str)
+                else certificate_raw
+            )
+            certificate = certificate_doc.get("certificate")
+            signature = base64.b64decode(certificate_doc.get("signature", ""))
+        except Exception:
+            self._last_error = "License signing certificate is invalid"
+            return False
+
+        if not isinstance(certificate, dict):
+            self._last_error = "License signing certificate is invalid"
+            return False
+        if certificate.get("issuer_kid") != root.get("kid"):
+            self._last_error = "License signing certificate issuer mismatch"
+            return False
+        if certificate.get("kid") != signing_key.get("kid"):
+            self._last_error = "License signing certificate key mismatch"
+            return False
+        if certificate.get("public_key") != signing_key.get("public_key"):
+            self._last_error = "License signing certificate public key mismatch"
+            return False
+
+        valid_from = parse_iso_datetime(certificate.get("valid_from"))
+        valid_until = parse_iso_datetime(certificate.get("valid_until"))
+        now = datetime.now().astimezone()
+        if valid_from and now < valid_from.astimezone():
+            self._last_error = "License signing certificate is not yet valid"
+            return False
+        if valid_until and now > valid_until.astimezone():
+            self._last_error = "License signing certificate has expired"
+            return False
+
+        try:
+            VerifyKey(base64.b64decode(root["public_key"])).verify(
+                php_json_bytes(certificate),
+                signature,
+            )
+        except BadSignatureError:
+            self._last_error = "License signing certificate signature is invalid"
+            return False
+        except Exception:
+            self._last_error = "License signing certificate could not be verified"
+            return False
+        return True
+
+    def _verify_token(
+        self,
+        token: str,
+        license_key: str | None,
+        key_bundle: dict | None = None,
+    ) -> dict | None:
         if VerifyKey is None:
             self._last_error = TOKEN_VERIFY_ERROR
             return None
@@ -715,7 +849,13 @@ class LicenseManager:
             return None
 
         payload_kid = payload.get("kid")
-        if payload_kid not in TRUSTED_SIGNING_KEYS:
+        signing_public_key = self._trusted_signing_key_from_bundle(
+            key_bundle,
+            payload_kid,
+        )
+        if signing_public_key is None:
+            signing_public_key = TRUSTED_SIGNING_KEYS.get(payload_kid)
+        if signing_public_key is None:
             self._last_error = f"Untrusted license signer: {payload_kid or 'missing kid'}"
             return None
         if payload.get("iss") != EXPECTED_ISSUER:
@@ -723,7 +863,7 @@ class LicenseManager:
             return None
 
         try:
-            verify_key = VerifyKey(base64.b64decode(TRUSTED_SIGNING_KEYS[payload_kid]))
+            verify_key = VerifyKey(base64.b64decode(signing_public_key))
             verify_key.verify(
                 pae(
                     [
@@ -743,7 +883,8 @@ class LicenseManager:
             return None
 
         expected_fingerprint = get_fingerprint()
-        if payload.get("usage_fingerprint") != expected_fingerprint:
+        payload_fingerprint = payload.get("usage_fingerprint") or payload.get("fingerprint")
+        if payload_fingerprint != expected_fingerprint:
             self._last_error = "License is not valid for this device"
             return None
 
@@ -755,10 +896,18 @@ class LicenseManager:
                 # issuer, and device fingerprint are valid.
                 self._last_error = ""
 
-        expires_at = payload.get("license_expires_at")
+        if not payload.get("status") and payload.get("license_status"):
+            payload["status"] = payload.get("license_status")
+
+        expires_at = (
+            payload.get("license_expires_at")
+            or payload.get("expires_at")
+            or payload.get("exp")
+        )
         if not expires_at:
             self._last_error = "License token is missing expiry information"
             return None
+        payload["license_expires_at"] = expires_at
 
         # The footer is still included in the verified signed message, but we also
         # sanity-check the advertised key id so the cached token metadata stays coherent.

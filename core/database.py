@@ -29,6 +29,7 @@ DEFAULT_REPORT_PRINT_CONFIG = {
 }
 
 DEFAULT_SIGNATORY_SEED_FILE = "seed_signatories.json"
+LEGACY_DURATION_OPTIONS = [2, 3, 6]
 
 
 # ─────────────────────────────────────────
@@ -365,6 +366,15 @@ def init_db(default_duration_options: list | None = None):
                ON CONFLICT (key) DO NOTHING""",
             (json.dumps(DEFAULT_REPORT_PRINT_CONFIG),)
         )
+        if default_duration_options is not None:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = 'duration_options'"
+            ).fetchone()
+            if _parse_duration_options(row['value'] if row else None, default_duration_options) == LEGACY_DURATION_OPTIONS:
+                conn.execute(
+                    """UPDATE app_settings SET value = %s WHERE key = 'duration_options'""",
+                    (json.dumps(default_duration_options),)
+                )
         for med in DEFAULT_MEDICATIONS_SEED:
             conn.execute(
                 "INSERT INTO medications (name) VALUES (%s) ON CONFLICT DO NOTHING",
@@ -511,7 +521,7 @@ def _row_to_snapshot(record, points: list, pk_row) -> dict:
         'dose_dt':                record['dose_dt']                or '',
         'sample_collection_date': record['sample_collection_date'] or '',
         'lab_no':                 record['lab_no']                 or 'N/A',
-        'test':                   record['test']                   or 'Serum',
+        'test':                   record['test']                   or 'Plasma',
         'diag':                   record['diagnosis']              or 'N/A',
         'tx_date':                record['tx_date']                or '',
         'delivery_date':          record['delivery_date']          or '',
@@ -582,7 +592,7 @@ def _draft_row_to_snapshot(row) -> dict:
         'dose_dt':                row['dose_dt']                or '',
         'sample_collection_date': row['sample_collection_date'] or '',
         'lab_no':                 row['lab_no']                 or 'N/A',
-        'test':                   row['test']                   or 'Serum',
+        'test':                   row['test']                   or 'Plasma',
         'diag':                   row['diagnosis']              or 'N/A',
         'tx_date':                row['tx_date']                or '',
         'delivery_date':          row['delivery_date']          or '',
@@ -661,7 +671,7 @@ def _save_draft(conn, snapshot: dict):
         patient.get('dose_dt'),
         patient.get('sample_collection_date'),
         patient.get('lab_no'),
-        patient.get('test') or 'Serum',
+        patient.get('test') or 'Plasma',
         patient.get('med'),
         snapshot.get('scheme'),
         snapshot.get('trough'),
@@ -780,7 +790,7 @@ def save_record(snapshot: dict, record_type: str = 'sample'):
             patient.get('dose_dt'),
             patient.get('sample_collection_date'),
             patient.get('lab_no'),
-            patient.get('test') or 'Serum',
+            patient.get('test') or 'Plasma',
             patient.get('med'),
             snapshot.get('scheme'),
             snapshot.get('trough'),
@@ -939,7 +949,15 @@ def load_duration_options(default_options: list) -> list:
         row = conn.execute(
             "SELECT value FROM app_settings WHERE key = 'duration_options'"
         ).fetchone()
-        return _parse_duration_options(row['value'] if row else None, default_options)
+        options = _parse_duration_options(row['value'] if row else None, default_options)
+        if options == LEGACY_DURATION_OPTIONS:
+            options = list(default_options)
+            conn.execute(
+                """INSERT INTO app_settings (key, value) VALUES ('duration_options', %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value""",
+                (json.dumps(options),)
+            )
+        return options
 
 
 def save_duration_options(options: list):

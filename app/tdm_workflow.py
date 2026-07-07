@@ -65,7 +65,7 @@ class TDMWorkflowMixin:
             "dose_dt": self.f_dose_dt.dateTime().toString("dd.MM.yyyy 'at' hh:mmAP"),
             "sample_collection_date": d_sam.toString("dd.MM.yyyy") if d_sam else "N/A",
             "lab_no": self.f_lab_no.text().strip() or "N/A",
-            "test": self.f_test.text().strip() or "Serum",
+            "test": self.f_test.text().strip() or "Plasma",
             "diag": self.f_diag.text().strip() or "N/A",
             "tx_date": d_tx.toString("dd.MM.yyyy") if d_tx else "N/A",
             "med": self.f_med.get_text() or "N/A",
@@ -338,7 +338,7 @@ class TDMWorkflowMixin:
         self.f_preparation.setText(patient.get("preparation", "Mycophenolate Mofetil"))
         self.f_dose.setText(patient.get("dose", "540mg - 720mg") if patient.get("dose") != "N/A" else "")
         self.f_lab_no.setText(patient.get("lab_no", "") if patient.get("lab_no") != "N/A" else "")
-        self.f_test.setText(patient.get("test", "Serum") if patient.get("test") != "N/A" else "Serum")
+        self.f_test.setText(patient.get("test", "Plasma") if patient.get("test") != "N/A" else "Plasma")
         tx_date = QDate.fromString(patient.get("tx_date", ""), "dd.MM.yyyy")
         self.f_tx_date.setDate(tx_date if tx_date.isValid() else None)
         dose_dt_text = patient.get("dose_dt", "")
@@ -809,7 +809,7 @@ class TDMWorkflowMixin:
             edit.clear()
         self.f_drug.setText("MPA")
         self.f_preparation.setText("Mycophenolate Mofetil")
-        self.f_test.setText("Serum")
+        self.f_test.setText("Plasma")
         self.f_diag.setText("Post Renal Transplant")
         self.f_sex.setCurrentIndex(0)
         self.f_med.clear_selection()
